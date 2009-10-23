@@ -21,32 +21,54 @@
 
 package cascading.pipe.cogroup;
 
+import java.util.Iterator;
+
 import cascading.flow.FlowProcess;
 import cascading.flow.hadoop.HadoopFlowProcess;
 import cascading.tuple.Fields;
 import cascading.tuple.IndexTuple;
 import cascading.tuple.SpillableTupleList;
 import cascading.tuple.Tuple;
+import org.apache.hadoop.io.compress.CompressionCodec;
+import org.apache.hadoop.mapred.JobConf;
+import org.apache.hadoop.util.ReflectionUtils;
 import org.apache.log4j.Logger;
 
-import java.util.Iterator;
-
-/** Class CoGroupClosure is used internally to represent co-grouping results of multiple tuple streams. */
+/**
+ * Class CoGroupClosure is used internally to represent co-grouping results of multiple tuple streams.
+ * <p/>
+ * <p/>
+ * "org.apache.hadoop.io.compress.LzoCodec,org.apache.hadoop.io.compress.GzipCodec,org.apache.hadoop.io.compress.DefaultCodec"
+ */
 public class CoGroupClosure extends GroupClosure
   {
   public static final String SPILL_THRESHOLD = "cascading.cogroup.spill.threshold";
   private static final int defaultThreshold = 10 * 1000;
+
+  public static final String SPILL_COMPRESS = "cascading.cogroup.spill.compress";
+
+  public static final String SPILL_CODECS = "cascading.cogroup.spill.codecs";
+  private static final String defaultCodecs = "org.apache.hadoop.io.compress.GzipCodec,org.apache.hadoop.io.compress.DefaultCodec";
 
   /** Field LOG */
   private static final Logger LOG = Logger.getLogger( CoGroupClosure.class );
 
   /** Field groups */
   SpillableTupleList[] groups;
+  private int numSelfJoins;
+  private CompressionCodec codec;
+  private long threshold;
+  private JobConf conf;
 
-  public CoGroupClosure( FlowProcess flowProcess, int numSelfJoins, Fields[] groupingFields, Fields[] valueFields, Tuple key, Iterator values )
+  public CoGroupClosure( FlowProcess flowProcess, int numSelfJoins, Fields[] groupingFields, Fields[] valueFields )
     {
-    super( groupingFields, valueFields, key, values );
-    build( flowProcess, numSelfJoins );
+    super( groupingFields, valueFields );
+    this.numSelfJoins = numSelfJoins;
+    this.codec = getCompressionCodec( flowProcess );
+    this.threshold = getLong( flowProcess, SPILL_THRESHOLD, defaultThreshold );
+    this.conf = ( (HadoopFlowProcess) flowProcess ).getJobConf();
+
+    initLists();
     }
 
   @Override
@@ -69,16 +91,18 @@ public class CoGroupClosure extends GroupClosure
     return groups[ pos ];
     }
 
-  public void build( FlowProcess flowProcess, int numSelfJoins )
+  @Override
+  public void reset( Tuple grouping, Iterator values )
     {
-    int numPipes = groupingFields.length;
-    groups = new SpillableTupleList[Math.max( numPipes, numSelfJoins + 1 )];
+    super.reset( grouping, values );
 
-    String serializations = (String) flowProcess.getProperty( "io.serializations" );
-    long threshold = getLong( flowProcess, SPILL_THRESHOLD, defaultThreshold );
+    build();
+    }
 
-    for( int i = 0; i < numPipes; i++ ) // use numPipes not repeat, see below
-      groups[ i ] = new SpillableTupleList( threshold, ( (HadoopFlowProcess) flowProcess ).getJobConf() );
+  public void build()
+    {
+    for( SpillableTupleList group : groups )
+      group.clear();
 
     while( values.hasNext() )
       {
@@ -95,6 +119,15 @@ public class CoGroupClosure extends GroupClosure
 
       groups[ pos ].add( (Tuple) current.getTuple() ); // get the value tuple for this cogroup
       }
+    }
+
+  private void initLists()
+    {
+    int numPipes = groupingFields.length;
+    groups = new SpillableTupleList[Math.max( numPipes, numSelfJoins + 1 )];
+
+    for( int i = 0; i < numPipes; i++ ) // use numPipes not numSelfJoins, see below
+      groups[ i ] = new SpillableTupleList( threshold, conf, codec );
 
     for( int i = 1; i < numSelfJoins + 1; i++ )
       groups[ i ] = groups[ 0 ];
@@ -108,5 +141,40 @@ public class CoGroupClosure extends GroupClosure
       return defaultValue;
 
     return Long.parseLong( value );
+    }
+
+  public CompressionCodec getCompressionCodec( FlowProcess flowProcess )
+    {
+    String compress = (String) flowProcess.getProperty( SPILL_COMPRESS );
+
+    if( compress != null && !Boolean.parseBoolean( compress ) )
+      return null;
+
+    String codecs = (String) flowProcess.getProperty( SPILL_CODECS );
+
+    if( codecs == null || codecs.length() == 0 )
+      codecs = defaultCodecs;
+
+    Class<? extends CompressionCodec> codecClass = null;
+
+    for( String codec : codecs.split( "[,\\s]*" ) )
+      {
+      try
+        {
+        codecClass = Thread.currentThread().getContextClassLoader().loadClass( codec ).asSubclass( CompressionCodec.class );
+        }
+      catch( ClassNotFoundException exception )
+        {
+        // do nothing
+        }
+      }
+
+    if( codecClass == null )
+      {
+      LOG.warn( "codecs set, but unable to load any: " + codecs );
+      return null;
+      }
+
+    return ReflectionUtils.newInstance( codecClass, ( (HadoopFlowProcess) flowProcess ).getJobConf() );
     }
   }

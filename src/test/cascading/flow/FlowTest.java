@@ -183,7 +183,7 @@ public class FlowTest extends ClusterTestCase
       if( map == null || map.values().size() == 0 )
         continue;
 
-      if( ( (FlowStep.FlowStepJob) map.values().iterator().next() ).wasStarted() )
+      if( ( (FlowStepJob) map.values().iterator().next() ).wasStarted() )
         break;
       }
 
@@ -338,7 +338,7 @@ public class FlowTest extends ClusterTestCase
         if( map == null || map.values().size() == 0 )
           continue;
 
-        if( ( (FlowStep.FlowStepJob) map.values().iterator().next() ).wasStarted() )
+        if( ( (FlowStepJob) map.values().iterator().next() ).wasStarted() )
           break;
         }
 
@@ -359,6 +359,26 @@ public class FlowTest extends ClusterTestCase
       {
       // ignore
       }
+    }
+
+  public void testFlowID() throws Exception
+    {
+    Tap source = new Lfs( new TextLine(), "input/path" );
+    Tap sink = new Hfs( new TextLine(), "output/path", true );
+
+    Pipe pipe = new Pipe( "test" );
+
+    Map<Object, Object> props = getProperties();
+    Flow flow1 = new FlowConnector( props ).connect( source, sink, pipe );
+
+//    System.out.println( "flow.getID() = " + flow1.getID() );
+
+    assertNotNull( "missing id", flow1.getID() );
+    assertNotNull( "missing id in conf", flow1.getJobConf().get( "cascading.flow.id" ) );
+
+    Flow flow2 = new FlowConnector( props ).connect( source, sink, pipe );
+
+    assertTrue( "same id", !flow1.getID().equalsIgnoreCase( flow2.getID() ) );
     }
 
   }

@@ -39,6 +39,6 @@ public class TestTextLine extends TextLine
   @Override
   public Tuple source( Object key, Object value )
     {
-    return new Tuple( value.toString().split( "\t" ) );
+    return new Tuple( (Object[]) value.toString().split( "\t" ) );
     }
   }

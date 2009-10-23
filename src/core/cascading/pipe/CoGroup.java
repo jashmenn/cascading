@@ -35,14 +35,20 @@ import cascading.tuple.Fields;
  * <p/>
  * By default CoGroup performs an inner join via the {@link InnerJoin} {@link cascading.pipe.cogroup.Joiner} class.
  * <p/>
- * Self joins an be achieved by using a constructor that takes a single Pipe and a numSelfJoins value. A value of
+ * Self joins can be achieved by using a constructor that takes a single Pipe and a numSelfJoins value. A value of
  * 1 for numSelfJoins will join the Pipe with itself once.
+ * <p/>
+ * The outgoing grouping Tuple stream is sorted by the natural order of the grouping fields. To control this order,
+ * at least the first groupingFields value given should be an instance of {@link cascading.tuple.Fields} containing
+ * {@link java.util.Comparator} instances for the appropriate fields.
+ * This allows fine grained control of the sort grouping order.
  *
  * @see cascading.pipe.cogroup.InnerJoin
  * @see cascading.pipe.cogroup.OuterJoin
  * @see cascading.pipe.cogroup.LeftJoin
  * @see cascading.pipe.cogroup.RightJoin
  * @see cascading.pipe.cogroup.MixedJoin
+ * @see cascading.tuple.Fields
  */
 public class CoGroup extends Group
   {
@@ -252,7 +258,7 @@ public class CoGroup extends Group
    *
    * @param pipe           of type Pipe
    * @param groupFields    of type Fields
-   * @param numSelfJoins         of type int
+   * @param numSelfJoins   of type int
    * @param declaredFields of type Fields
    */
   public CoGroup( Pipe pipe, Fields groupFields, int numSelfJoins, Fields declaredFields )
@@ -266,7 +272,7 @@ public class CoGroup extends Group
    *
    * @param pipe           of type Pipe
    * @param groupFields    of type Fields
-   * @param numSelfJoins         of type int
+   * @param numSelfJoins   of type int
    * @param declaredFields of type Fields
    * @param joiner         of type CoGrouper
    */
@@ -279,10 +285,10 @@ public class CoGroup extends Group
    * Constructor CoGroup creates a new CoGroup instance that performs numSelfJoins number of self joins on the
    * given {@link Pipe} instance.
    *
-   * @param pipe        of type Pipe
-   * @param groupFields of type Fields
-   * @param numSelfJoins      of type int
-   * @param joiner      of type CoGrouper
+   * @param pipe         of type Pipe
+   * @param groupFields  of type Fields
+   * @param numSelfJoins of type int
+   * @param joiner       of type CoGrouper
    */
   public CoGroup( Pipe pipe, Fields groupFields, int numSelfJoins, Joiner joiner )
     {
@@ -293,9 +299,9 @@ public class CoGroup extends Group
    * Constructor CoGroup creates a new CoGroup instance that performs numSelfJoins number of self joins on the
    * given {@link Pipe} instance.
    *
-   * @param pipe        of type Pipe
-   * @param groupFields of type Fields
-   * @param numSelfJoins      of type int
+   * @param pipe         of type Pipe
+   * @param groupFields  of type Fields
+   * @param numSelfJoins of type int
    */
   public CoGroup( Pipe pipe, Fields groupFields, int numSelfJoins )
     {
@@ -309,7 +315,7 @@ public class CoGroup extends Group
    * @param groupName      of type String
    * @param pipe           of type Pipe
    * @param groupFields    of type Fields
-   * @param numSelfJoins         of type int
+   * @param numSelfJoins   of type int
    * @param declaredFields of type Fields
    */
   public CoGroup( String groupName, Pipe pipe, Fields groupFields, int numSelfJoins, Fields declaredFields )
@@ -324,7 +330,7 @@ public class CoGroup extends Group
    * @param groupName      of type String
    * @param pipe           of type Pipe
    * @param groupFields    of type Fields
-   * @param numSelfJoins         of type int
+   * @param numSelfJoins   of type int
    * @param declaredFields of type Fields
    * @param joiner         of type CoGrouper
    */
@@ -337,11 +343,11 @@ public class CoGroup extends Group
    * Constructor CoGroup creates a new CoGroup instance that performs numSelfJoins number of self joins on the
    * given {@link Pipe} instance.
    *
-   * @param groupName   of type String
-   * @param pipe        of type Pipe
-   * @param groupFields of type Fields
-   * @param numSelfJoins      of type int
-   * @param joiner      of type CoGrouper
+   * @param groupName    of type String
+   * @param pipe         of type Pipe
+   * @param groupFields  of type Fields
+   * @param numSelfJoins of type int
+   * @param joiner       of type CoGrouper
    */
   public CoGroup( String groupName, Pipe pipe, Fields groupFields, int numSelfJoins, Joiner joiner )
     {
@@ -352,10 +358,10 @@ public class CoGroup extends Group
    * Constructor CoGroup creates a new CoGroup instance that performs numSelfJoins number of self joins on the
    * given {@link Pipe} instance.
    *
-   * @param groupName   of type String
-   * @param pipe        of type Pipe
-   * @param groupFields of type Fields
-   * @param numSelfJoins      of type int
+   * @param groupName    of type String
+   * @param pipe         of type Pipe
+   * @param groupFields  of type Fields
+   * @param numSelfJoins of type int
    */
   public CoGroup( String groupName, Pipe pipe, Fields groupFields, int numSelfJoins )
     {

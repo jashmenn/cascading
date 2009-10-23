@@ -21,6 +21,8 @@
 
 package cascading.flow.stack;
 
+import java.io.IOException;
+
 import cascading.CascadingException;
 import cascading.flow.FlowElement;
 import cascading.flow.FlowException;
@@ -30,8 +32,6 @@ import cascading.pipe.Group;
 import cascading.tap.Tap;
 import cascading.tuple.Tuple;
 import cascading.tuple.TupleEntry;
-
-import java.io.IOException;
 
 /**
  *

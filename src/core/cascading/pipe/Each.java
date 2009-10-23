@@ -21,6 +21,8 @@
 
 package cascading.pipe;
 
+import java.util.Set;
+
 import cascading.CascadingException;
 import cascading.flow.FlowCollector;
 import cascading.flow.FlowElement;
@@ -29,6 +31,8 @@ import cascading.flow.Scope;
 import cascading.operation.Assertion;
 import cascading.operation.AssertionLevel;
 import cascading.operation.ConcreteCall;
+import cascading.operation.Debug;
+import cascading.operation.DebugLevel;
 import cascading.operation.Filter;
 import cascading.operation.FilterCall;
 import cascading.operation.Function;
@@ -39,8 +43,6 @@ import cascading.tuple.Tuple;
 import cascading.tuple.TupleEntry;
 import cascading.tuple.TupleEntryCollector;
 import org.apache.log4j.Logger;
-
-import java.util.Set;
 
 /**
  * The Each operator applies either a {@link Function} or a {@link Filter} to each entry in the {@link Tuple}
@@ -202,9 +204,9 @@ public class Each extends Operator
     super( previous, argumentSelector, filter, FILTER_SELECTOR );
     }
 
-  ////////////////////
-  // TAKE ASSERTIONS
-  ///////////////////
+  ///////////////
+  // ASSERTIONS
+  ///////////////
 
   /**
    * Constructor Each creates a new Each instance.
@@ -250,9 +252,49 @@ public class Each extends Operator
     super( previous, argumentSelector, assertionLevel, assertion, FILTER_SELECTOR );
     }
 
+  //////////
+  //DEBUG
+  //////////
+
+  /**
+   * @param name             name for this branch of Pipes
+   * @param argumentSelector field selector that selects Function arguments from the input Tuple
+   * @param debugLevel       DebugLevel to associate with the Debug
+   * @param debug            Debug to be applied to each input Tuple
+   */
+  public Each( String name, Fields argumentSelector, DebugLevel debugLevel, Debug debug )
+    {
+    super( name, argumentSelector, debugLevel, debug, FILTER_SELECTOR );
+    }
+
+  /**
+   * @param previous   previous Pipe to receive input Tuples from
+   * @param debugLevel DebugLevel to associate with the Debug
+   * @param debug      Debug to be applied to each input Tuple
+   */
+  public Each( Pipe previous, DebugLevel debugLevel, Debug debug )
+    {
+    super( previous, debugLevel, debug, FILTER_SELECTOR );
+    }
+
+  /**
+   * @param previous         previous Pipe to receive input Tuples from
+   * @param argumentSelector field selector that selects Function arguments from the input Tuple
+   * @param debugLevel       DebugLevel to associate with the Debug
+   * @param debug            Debug to be applied to each input Tuple
+   */
+  public Each( Pipe previous, Fields argumentSelector, DebugLevel debugLevel, Debug debug )
+    {
+    super( previous, argumentSelector, debugLevel, debug, FILTER_SELECTOR );
+    }
+
   @Override
   protected void verifyOperation()
     {
+    // backwards compatibility with 1.0
+    if( plannerLevel == null && operation instanceof Debug )
+      plannerLevel = DebugLevel.DEFAULT;
+
     super.verifyOperation();
 
     if( !argumentSelector.isArgSelector() )
@@ -337,28 +379,30 @@ public class Each extends Operator
   /** @see Operator#outgoingScopeFor(Set<Scope>) */
   public Scope outgoingScopeFor( Set<Scope> incomingScopes )
     {
-    Fields argumentSelector = resolveArgumentSelector( incomingScopes );
+    Fields argumentFields = resolveArgumentSelector( incomingScopes );
 
-    verifyArguments( argumentSelector );
+    verifyArguments( argumentFields );
 
-    Fields declared = resolveDeclared( incomingScopes, argumentSelector );
+    Fields declaredFields = resolveDeclared( incomingScopes, argumentFields );
 
-    verifyDeclared( declared );
+    verifyDeclaredFields( declaredFields );
 
-    Fields outgoingValuesSelector = resolveOutgoingValuesSelector( incomingScopes, argumentSelector, declared );
+    Fields outgoingValuesFields = resolveOutgoingValuesSelector( incomingScopes, argumentFields, declaredFields );
 
-    verifyOutputSelector( outgoingValuesSelector );
+    verifyOutputSelector( outgoingValuesFields );
 
-    Fields outgoingGrouping = Fields.asDeclaration( outgoingValuesSelector );
+    Fields outgoingGroupingFields = Fields.asDeclaration( outgoingValuesFields );
 
-    return new Scope( getName(), Scope.Kind.EACH, argumentSelector, declared, outgoingGrouping, outgoingValuesSelector );
+    Fields remainderFields = resolveRemainderFields( incomingScopes, argumentFields );
+
+    return new Scope( getName(), Scope.Kind.EACH, remainderFields, argumentFields, declaredFields, outgoingGroupingFields, outgoingValuesFields );
     }
 
-  Fields resolveOutgoingValuesSelector( Set<Scope> incomingScopes, Fields argumentSelector, Fields declared )
+  Fields resolveOutgoingValuesSelector( Set<Scope> incomingScopes, Fields argumentFields, Fields declaredFields )
     {
     try
       {
-      return resolveOutgoingSelector( incomingScopes, argumentSelector, declared );
+      return resolveOutgoingSelector( incomingScopes, argumentFields, declaredFields );
       }
     catch( Exception exception )
       {
@@ -459,7 +503,7 @@ public class Each extends Operator
       {
       protected void collect( Tuple tuple )
         {
-        flowCollector.collect( makeResult( scope.getOutValuesSelector(), input, scope.getDeclaredEntry(), tuple ) );
+        flowCollector.collect( makeResult( scope.getOutValuesSelector(), input, scope.getRemainderFields(), scope.getDeclaredEntry(), tuple ) );
         }
       };
 

@@ -37,6 +37,7 @@ import cascading.pipe.cogroup.GroupClosure;
 import cascading.pipe.cogroup.InnerJoin;
 import cascading.pipe.cogroup.Joiner;
 import cascading.tuple.Fields;
+import cascading.tuple.FieldsResolverException;
 import cascading.tuple.IndexTuple;
 import cascading.tuple.Tuple;
 import cascading.tuple.TupleEntry;
@@ -79,6 +80,7 @@ public class Group extends Pipe
 
   /** Field pipePos */
   private transient Map<String, Integer> pipePos;
+  private GroupClosure closure;
 
   /**
    * Constructor Group creates a new Group instance.
@@ -106,11 +108,7 @@ public class Group extends Pipe
    */
   protected Group( Pipe lhs, Fields lhsGroupFields, Pipe rhs, Fields rhsGroupFields, Fields declaredFields, Joiner joiner )
     {
-    this( lhs, lhsGroupFields, rhs, rhsGroupFields );
-    this.declaredFields = declaredFields;
-    this.joiner = joiner;
-
-    verifyCoGrouper();
+    this( Pipe.pipes( lhs, rhs ), Fields.fields( lhsGroupFields, rhsGroupFields ), declaredFields, joiner );
     }
 
   /**
@@ -354,7 +352,9 @@ public class Group extends Pipe
    */
   protected Group( Pipe pipe, Fields groupFields, int numSelfJoins, Joiner joiner )
     {
-    this( pipe, groupFields, numSelfJoins );
+    addPipe( pipe );
+    this.groupFieldsMap.put( pipe.getName(), groupFields );
+    this.numSelfJoins = numSelfJoins;
     this.joiner = joiner;
 
     verifyCoGrouper();
@@ -369,9 +369,7 @@ public class Group extends Pipe
    */
   protected Group( Pipe pipe, Fields groupFields, int numSelfJoins )
     {
-    addPipe( pipe );
-    this.groupFieldsMap.put( pipe.getName(), groupFields );
-    this.numSelfJoins = numSelfJoins;
+    this( pipe, groupFields, numSelfJoins, (Joiner) null );
     }
 
   /**
@@ -608,12 +606,16 @@ public class Group extends Pipe
       }
 
     this.reverseOrder = reverseOrder;
+    this.joiner = new InnerJoin();
     }
 
   private void verifyCoGrouper()
     {
     if( joiner == null )
+      {
+      joiner = new InnerJoin();
       return;
+      }
 
     if( joiner.numJoins() == -1 )
       return;
@@ -783,24 +785,26 @@ public class Group extends Pipe
   /**
    * Method makeReduceValues wrapps the incoming Hadoop value stream as an iterator over {@link Tuple} instance.
    *
-   * @param flowProcess    of type FlowSession
-   * @param incomingScopes of type Set<Scope>
-   * @param outgoingScope  of type Scope
-   * @param key            of type WritableComparable
-   * @param values         of type Iterator @return Iterator<Tuple>
+   * @param key    of type WritableComparable
+   * @param values of type Iterator @return Iterator<Tuple>
    * @return a Tuple Iterator
    */
-  public Iterator<Tuple> iterateReduceValues( FlowProcess flowProcess, Set<Scope> incomingScopes, Scope outgoingScope, Tuple key, Iterator values )
+  public Iterator<Tuple> iterateReduceValues( Tuple key, Iterator values )
     {
-    GroupClosure closure;
+    closure.reset( key, values );
 
+    return joiner.getIterator( closure );
+    }
+
+  public void initializeReduce( FlowProcess flowProcess, Set<Scope> incomingScopes, Scope outgoingScope )
+    {
     if( isGroupBy() )
       {
       Scope incomingScope = incomingScopes.iterator().next();
       Fields[] groupFields = Fields.fields( outgoingScope.getGroupingSelectors().get( incomingScope.getName() ) );
       Fields[] valuesFields = Fields.fields( incomingScope.getOutValuesFields() );
 
-      closure = new GroupClosure( groupFields, valuesFields, (Tuple) key, values );
+      closure = new GroupClosure( groupFields, valuesFields );
       }
     else
       {
@@ -815,13 +819,8 @@ public class Group extends Pipe
         valuesFields[ pos ] = incomingScope.getOutValuesFields();
         }
 
-      closure = new CoGroupClosure( flowProcess, numSelfJoins, groupFields, valuesFields, (Tuple) key, values );
+      closure = new CoGroupClosure( flowProcess, numSelfJoins, groupFields, valuesFields );
       }
-
-    if( joiner == null )
-      return new InnerJoin().getIterator( closure );
-    else
-      return joiner.getIterator( closure );
     }
 
   /**
@@ -874,6 +873,10 @@ public class Group extends Pipe
 
       return groupingFields;
       }
+    catch( FieldsResolverException exception )
+      {
+      throw new OperatorException( this, OperatorException.Kind.grouping, exception.getSourceFields(), exception.getSelectorFields(), exception );
+      }
     catch( RuntimeException exception )
       {
       throw new OperatorException( this, "could not resolve grouping selector in: " + this, exception );
@@ -916,6 +919,10 @@ public class Group extends Pipe
         return null;
 
       return resolveSelectorsAgainstIncoming( incomingScopes, getSortingSelectors(), "sorting" );
+      }
+    catch( FieldsResolverException exception )
+      {
+      throw new OperatorException( this, OperatorException.Kind.sorting, exception.getSourceFields(), exception.getSelectorFields(), exception );
       }
     catch( RuntimeException exception )
       {

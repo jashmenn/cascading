@@ -21,16 +21,21 @@
 
 package cascading.tap.hadoop;
 
+import java.io.IOException;
+
 import cascading.tap.Tap;
 import cascading.tap.TapException;
 import cascading.tuple.Tuple;
 import cascading.tuple.TupleEntry;
 import cascading.tuple.TupleEntryCollector;
 import org.apache.hadoop.fs.Path;
-import org.apache.hadoop.mapred.*;
+import org.apache.hadoop.mapred.FileOutputFormat;
+import org.apache.hadoop.mapred.JobConf;
+import org.apache.hadoop.mapred.OutputCollector;
+import org.apache.hadoop.mapred.OutputFormat;
+import org.apache.hadoop.mapred.RecordWriter;
+import org.apache.hadoop.mapred.Reporter;
 import org.apache.log4j.Logger;
-
-import java.io.IOException;
 
 /**
  * Class TapCollector is a kind of {@link cascading.tuple.TupleEntryCollector} that writes tuples to the resource managed by
@@ -55,6 +60,8 @@ public class TapCollector extends TupleEntryCollector implements OutputCollector
   private String prefix;
   /** Field outputEntry */
   private TupleEntry outputEntry;
+  /** Field isFileOutputFormat */
+  private boolean isFileOutputFormat;
   /** Field reporter */
   private Reporter reporter = Reporter.NULL;
 
@@ -84,6 +91,7 @@ public class TapCollector extends TupleEntryCollector implements OutputCollector
     this.prefix = prefix == null || prefix.length() == 0 ? null : prefix;
     this.conf = new JobConf( conf );
     this.outputEntry = new TupleEntry( tap.getSinkFields() );
+    this.filenamePattern = conf.get( "cascading.tapcollector.partname", this.filenamePattern );
 
     initalize();
     }
@@ -92,16 +100,21 @@ public class TapCollector extends TupleEntryCollector implements OutputCollector
     {
     tap.sinkInit( conf ); // tap should not delete if called within a task
 
-    Hadoop18TapUtil.setupJob( conf );
-
-    if( prefix != null )
-      filename = String.format( filenamePattern, prefix, "/", conf.getInt( "mapred.task.partition", 0 ) );
-    else
-      filename = String.format( filenamePattern, "", "", conf.getInt( "mapred.task.partition", 0 ) );
-
-    Hadoop18TapUtil.setupTask( conf );
-
     OutputFormat outputFormat = conf.getOutputFormat();
+
+    isFileOutputFormat = outputFormat instanceof FileOutputFormat;
+
+    if( isFileOutputFormat )
+      {
+      Hadoop18TapUtil.setupJob( conf );
+
+      if( prefix != null )
+        filename = String.format( filenamePattern, prefix, "/", conf.getInt( "mapred.task.partition", 0 ) );
+      else
+        filename = String.format( filenamePattern, "", "", conf.getInt( "mapred.task.partition", 0 ) );
+
+      Hadoop18TapUtil.setupTask( conf );
+      }
 
     writer = outputFormat.getRecordWriter( null, conf, filename, Reporter.NULL );
     }
@@ -130,14 +143,25 @@ public class TapCollector extends TupleEntryCollector implements OutputCollector
     {
     try
       {
-      LOG.info( "closing tap collector for: " + new Path( tap.getPath(), filename ) );
+      if( isFileOutputFormat )
+        LOG.info( "closing tap collector for: " + new Path( tap.getPath(), filename ) );
+      else
+        LOG.info( "closing tap collector for: " + tap.toString() );
 
-      writer.close( reporter );
+      try
+        {
+        writer.close( reporter );
+        }
+      finally
+        {
+        if( isFileOutputFormat )
+          {
+          if( Hadoop18TapUtil.needsTaskCommit( conf ) )
+            Hadoop18TapUtil.commitTask( conf );
 
-      if( Hadoop18TapUtil.needsTaskCommit( conf ) )
-        Hadoop18TapUtil.commitTask( conf );
-
-      Hadoop18TapUtil.cleanupJob( conf );
+          Hadoop18TapUtil.cleanupJob( conf );
+          }
+        }
       }
     catch( IOException exception )
       {

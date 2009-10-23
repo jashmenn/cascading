@@ -78,24 +78,37 @@ public class Tuples
    */
   public static Object coerce( Tuple tuple, int pos, Class type )
     {
-    if( type == Object.class )
+    Comparable value = tuple.get( pos );
+
+    if( value != null && type == value.getClass() )
       return tuple.get( pos );
-    else if( type == String.class )
+
+    if( type == Object.class )
+      return value;
+
+    if( type == String.class )
       return tuple.getString( pos );
-    else if( type == Integer.class || type == int.class )
-        return tuple.getInteger( pos );
-      else if( type == Long.class || type == long.class )
-          return tuple.getLong( pos );
-        else if( type == Double.class || type == double.class )
-            return tuple.getDouble( pos );
-          else if( type == Float.class || type == float.class )
-              return tuple.getFloat( pos );
-            else if( type == Short.class || type == short.class )
-                return tuple.getShort( pos );
-              else if( type == Boolean.class || type == boolean.class )
-                  return tuple.getBoolean( pos );
-                else if( type != null )
-                    throw new OperationException( "could not coerce value, " + tuple.get( pos ) + " to type: " + type.getName() );
+
+    if( type == Integer.class || type == int.class )
+      return tuple.getInteger( pos );
+
+    if( type == Long.class || type == long.class )
+      return tuple.getLong( pos );
+
+    if( type == Double.class || type == double.class )
+      return tuple.getDouble( pos );
+
+    if( type == Float.class || type == float.class )
+      return tuple.getFloat( pos );
+
+    if( type == Short.class || type == short.class )
+      return tuple.getShort( pos );
+
+    if( type == Boolean.class || type == boolean.class )
+      return tuple.getBoolean( pos );
+
+    if( type != null )
+      throw new OperationException( "could not coerce value, " + tuple.get( pos ) + " to type: " + type.getName() );
 
     return null;
     }
@@ -109,7 +122,7 @@ public class Tuples
    */
   public static Tuple coerce( Tuple tuple, Class[] types )
     {
-    return new Tuple( (Comparable[]) asArray( tuple, types, new Comparable[types.length] ) );
+    return new Tuple( (Object[]) asArray( tuple, types, new Object[types.length] ) );
     }
 
   /**

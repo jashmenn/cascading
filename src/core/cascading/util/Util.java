@@ -44,7 +44,9 @@ import cascading.flow.Scope;
 import cascading.operation.BaseOperation;
 import cascading.operation.Operation;
 import cascading.pipe.Pipe;
+import cascading.scheme.Scheme;
 import org.apache.commons.codec.binary.Base64;
+import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.mapred.JobConf;
 import org.apache.log4j.Logger;
@@ -99,6 +101,19 @@ public class Util
       {
       throw new FlowException( "unable to deserialize data", exception );
       }
+    }
+
+  /**
+   * This method creates a globally unique HEX value seeded by the given string.
+   *
+   * @param seed
+   * @return
+   */
+  public static String createUniqueID( String seed )
+    {
+    String base = String.format( "%s%d%.10f", seed, System.currentTimeMillis(), Math.random() );
+
+    return DigestUtils.md5Hex( base );
     }
 
   /**
@@ -377,6 +392,20 @@ public class Util
     while( list.remove( null ) )
       ;
     }
+
+  public static String formatTrace( Scheme scheme, String message )
+    {
+    if( scheme == null )
+      return message;
+
+    String trace = scheme.getTrace();
+
+    if( trace == null )
+      return message;
+
+    return "[" + truncate( scheme.toString(), 25 ) + "][" + trace + "] " + message;
+    }
+
 
   public static String formatTrace( Pipe pipe, String message )
     {

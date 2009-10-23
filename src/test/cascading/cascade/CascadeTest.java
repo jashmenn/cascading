@@ -21,11 +21,16 @@
 
 package cascading.cascade;
 
+import java.io.IOException;
+import java.util.Map;
+import java.util.concurrent.Callable;
+import java.util.concurrent.TimeUnit;
+
 import cascading.ClusterTestCase;
 import cascading.flow.Flow;
 import cascading.flow.FlowConnector;
 import cascading.flow.FlowSkipStrategy;
-import cascading.flow.FlowStep;
+import cascading.flow.FlowStepJob;
 import cascading.flow.LockingFlowListener;
 import cascading.operation.Identity;
 import cascading.operation.regex.RegexSplitter;
@@ -35,14 +40,9 @@ import cascading.pipe.Pipe;
 import cascading.scheme.SequenceFile;
 import cascading.scheme.TextLine;
 import cascading.tap.Hfs;
-import cascading.tap.MultiTap;
+import cascading.tap.MultiSourceTap;
 import cascading.tap.Tap;
 import cascading.tuple.Fields;
-
-import java.io.IOException;
-import java.util.Map;
-import java.util.concurrent.Callable;
-import java.util.concurrent.TimeUnit;
 
 public class CascadeTest extends ClusterTestCase
   {
@@ -120,7 +120,7 @@ public class CascadeTest extends ClusterTestCase
 
     pipe = new Each( pipe, new Identity() );
 
-    Tap source = new MultiTap( sources );
+    Tap source = new MultiSourceTap( sources );
     Tap sink = new Hfs( new TextLine(), outputPath + path + "/multitap", true );
 
     return new FlowConnector( getProperties() ).connect( source, sink, pipe );
@@ -226,7 +226,7 @@ public class CascadeTest extends ClusterTestCase
       if( map == null || map.values().size() == 0 )
         continue;
 
-      if( ( (FlowStep.FlowStepJob) map.values().iterator().next() ).wasStarted() )
+      if( ( (FlowStepJob) map.values().iterator().next() ).wasStarted() )
         break;
       }
 
@@ -236,5 +236,25 @@ public class CascadeTest extends ClusterTestCase
 
     assertTrue( "did not stop", listener.stopped.tryAcquire( 60, TimeUnit.SECONDS ) );
     assertTrue( "did not complete", listener.completed.tryAcquire( 60, TimeUnit.SECONDS ) );
+    }
+
+  public void testCascadeID() throws IOException
+    {
+    String path = "simple";
+
+    Flow first = firstFlow( path );
+    Flow second = secondFlow( first.getSink(), path );
+    Flow third = thirdFlow( second.getSink(), path );
+    Flow fourth = fourthFlow( third.getSink(), path );
+
+    Cascade cascade = new CascadeConnector().connect( first, second, third, fourth );
+
+    String id = cascade.getID();
+
+    assertNotNull( "id is null", id );
+    assertEquals( first.getProperty( "cascading.cascade.id" ), id );
+    assertEquals( second.getProperty( "cascading.cascade.id" ), id );
+    assertEquals( third.getProperty( "cascading.cascade.id" ), id );
+    assertEquals( fourth.getProperty( "cascading.cascade.id" ), id );
     }
   }

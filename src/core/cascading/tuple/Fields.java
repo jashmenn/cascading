@@ -24,6 +24,7 @@ package cascading.tuple;
 import java.io.Serializable;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -43,9 +44,8 @@ import cascading.util.Util;
  * A Fields instance may also represent a set of field names.
  * <p/>
  * Fields are used as both declarators and selectors. A declarator declares that a given {@link Tap} or
- * {@link cascading.operation.BaseOperation}
- * returns the given field names, for a set of values the size of the given Fields instance. A selector is used to select
- * given referenced fields from a Tuple.
+ * {@link cascading.operation.Operation} returns the given field names, for a set of values the size of
+ * the given Fields instance. A selector is used to select given referenced fields from a Tuple.
  * For example; <br/>
  * <code>Fields fields = new Fields( "a", "b", "c" );</code><br/>
  * This creates a new Fields instance with the field names "a", "b", and "c". This Fields instance can be used as both
@@ -59,7 +59,8 @@ import cascading.util.Util;
  * and last positions would be the same, and would throw an error on there being duplicate field names in the selected
  * Tuple instance.
  * <p/>
- * Additionally, there are six predefined Fields sets used for different purposes; {@link #ALL}, {@link #GROUP}, {@link #VALUES}, {@link #ARGS}, {@link #RESULTS}, and {@link #UNKNOWN}.
+ * Additionally, there are eight predefined Fields sets used for different purposes; {@link #ALL}, {@link #GROUP},
+ * {@link #VALUES}, {@link #ARGS}, {@link #RESULTS}, {@link #UNKNOWN}, {@link #REPLACE}, and {@link #SWAP}.
  * <p/>
  * The ALL Fields set is a "wildcard" that represents all the current available fields.
  * <p/>
@@ -68,8 +69,26 @@ import cascading.util.Util;
  * <p/>
  * The VALUES Fields set represent all the fields not used as grouping fields in a previous Group.
  * <p/>
+ * The ARGS Fields set is used to let a given Operation inherit the field names of its argument Tuple. This Fields set
+ * is a convenience and is typically used when the Pipe output selector is RESULTS.
+ * <p/>
+ * The RESULTS Fields set is used to represent the field names of the current Operations return values. This Fields
+ * set may only be used as an output selector on a Pipe. It effectively replaces in the input Tuple with the Operation result
+ * Tuple.
+ * <p/>
+ * The UNKNOWN Fields set is used when Fields must be declared, but how many and their names is unknown. This allows
+ * for arbitrarily lengthed Tuples from an input source or some Operation.
+ * <p/>
+ * The REPLACE Fields set is used as an output selector to inline replace the values of the Operation arguments with
+ * the results of an Operation. This is a convenience Fields set that allows subsequent Operations to 'step' on the
+ * value with a given field name. The current Operation must always use the exact same field names, or the ARGS Fields
+ * set.
+ * <p/>
+ * The SWAP Fields set is used as an output selector to swap out Operation arguments with its results. Neither the argument and
+ * result field names or size need to be the same. This is useful for when the Operation arguments are no longer necessary
+ * and the result Fields and values should be appended to the remainder of the input field names and Tuple.
  */
-public final class Fields implements Comparable, Iterable, Serializable
+public class Fields implements Comparable, Iterable<Comparable>, Serializable, Comparator<Tuple>
   {
   /** Field UNKNOWN */
   public static final Fields UNKNOWN = new Fields( Kind.UNKNOWN );
@@ -83,6 +102,10 @@ public final class Fields implements Comparable, Iterable, Serializable
   public static final Fields ARGS = new Fields( Kind.ARGS );
   /** Field RESULTS represents all fields returned by the current operation */
   public static final Fields RESULTS = new Fields( Kind.RESULTS );
+  /** Field REPLACE represents all incoming fields, and allows their values to be replaced by the current operation results. */
+  public static final Fields REPLACE = new Fields( Kind.REPLACE );
+  /** Field SWAP represents all fields not used as arguments for the current operation and the operations results. */
+  public static final Fields SWAP = new Fields( Kind.SWAP );
   /** Field FIRST represents the first field position, 0 */
   public static final Fields FIRST = new Fields( 0 );
   /** Field LAST represents the last field postition, -1 */
@@ -95,7 +118,7 @@ public final class Fields implements Comparable, Iterable, Serializable
    */
   static enum Kind
     {
-      ALL, GROUP, VALUES, ARGS, RESULTS, UNKNOWN;
+      ALL, GROUP, VALUES, ARGS, RESULTS, UNKNOWN, REPLACE, SWAP;
     }
 
   /** Field fields */
@@ -104,6 +127,8 @@ public final class Fields implements Comparable, Iterable, Serializable
   boolean isOrdered = true;
   /** Field kind */
   Kind kind;
+  /** Field comparators */
+  Comparator[] comparators;
 
   /** Field thisPos */
   transient int[] thisPos;
@@ -224,13 +249,14 @@ public final class Fields implements Comparable, Iterable, Serializable
     {
     boolean hasUnknowns = false;
     int size = 0;
+
     for( Fields field : fields )
       {
       if( field.isUnknown() )
         hasUnknowns = true;
 
       if( !field.isDefined() && field.isUnOrdered() )
-        throw new TupleException( "unable to select from field set: " + field.print() );
+        throw new TupleException( "unable to select from field set: " + field.printVerbose() );
 
       size += field.size();
       }
@@ -243,6 +269,17 @@ public final class Fields implements Comparable, Iterable, Serializable
         result = result.append( fields[ i ] );
 
       return result;
+      }
+
+    if( selector.isReplace() )
+      {
+      if( fields[ 1 ].isUnknown() )
+        throw new TupleException( "cannot replace fields with unknown field declaration" );
+
+      if( !fields[ 0 ].contains( fields[ 1 ] ) )
+        throw new TupleException( "could not find all fields to be replaced, available: " + fields[ 0 ].printVerbose() + ",  declared: " + fields[ 1 ].printVerbose() );
+
+      return fields[ 0 ];
       }
 
     // we can't deal with anything but ALL
@@ -266,7 +303,7 @@ public final class Fields implements Comparable, Iterable, Serializable
     notFound.removeAll( found );
 
     if( !notFound.isEmpty() )
-      throw new TupleException( "selector did not find fields: [" + Util.join( notFound, ", " ) + "] in [" + Util.join( join( size, fields ), ", " ) + "]" );
+      throw new FieldsResolverException( new Fields( join( size, fields ) ), new Fields( notFound.toArray( new Comparable[0] ) ) );
 
     if( hasUnknowns )
       return selector;
@@ -412,7 +449,7 @@ public final class Fields implements Comparable, Iterable, Serializable
    */
   public boolean isOutSelector()
     {
-    return isAll() || isResults() || isDefined();
+    return isAll() || isResults() || isReplace() || isSwap() || isDefined();
     }
 
   /**
@@ -485,6 +522,26 @@ public final class Fields implements Comparable, Iterable, Serializable
   public boolean isResults()
     {
     return kind == Kind.RESULTS;
+    }
+
+  /**
+   * Method isReplace returns true if this instance is the {@link #REPLACE} field set.
+   *
+   * @return the replace (type boolean) of this Fields object.
+   */
+  public boolean isReplace()
+    {
+    return kind == Kind.REPLACE;
+    }
+
+  /**
+   * Method isSwap returns true if this instance is the {@link #SWAP} field set.
+   *
+   * @return the swap (type boolean) of this Fields object.
+   */
+  public boolean isSwap()
+    {
+    return kind == Kind.SWAP;
     }
 
   /**
@@ -702,7 +759,7 @@ public final class Fields implements Comparable, Iterable, Serializable
     Integer result = getIndex().get( fieldName );
 
     if( result == null )
-      throw new TupleException( "field not found: '" + fieldName + "', available fields: " + this.print() );
+      throw new FieldsResolverException( this, new Fields( fieldName ) );
 
     return result;
     }
@@ -825,6 +882,33 @@ public final class Fields implements Comparable, Iterable, Serializable
       result.kind = Kind.UNKNOWN;
 
     return result;
+    }
+
+  /**
+   * Method project will return a new Fields instance similar to the given fields instance
+   * except any absolute positional elements will be replaced by the current field names, if any.
+   *
+   * @param fields of type Fields
+   * @return Fields
+   */
+  public Fields project( Fields fields )
+    {
+    if( fields == null )
+      return this;
+
+    Fields results = size( fields.size() );
+
+    for( int i = 0; i < fields.fields.length; i++ )
+      {
+      if( fields.fields[ i ] instanceof String )
+        results.fields[ i ] = fields.fields[ i ];
+      else if( this.fields[ i ] instanceof String )
+        results.fields[ i ] = this.fields[ i ];
+      else
+        results.fields[ i ] = i;
+      }
+
+    return results;
     }
 
   private static void copy( Set<String> names, Fields result, Fields fields, int offset )
@@ -1043,6 +1127,80 @@ public final class Fields implements Comparable, Iterable, Serializable
   public final int size()
     {
     return fields.length;
+    }
+
+  /**
+   * Method setComparator should be used to associate a {@link java.util.Comparator} with a given field name or position.
+   *
+   * @param fieldName  of type Comparable
+   * @param comparator of type Comparator
+   */
+  public void setComparator( Comparable fieldName, Comparator comparator )
+    {
+    if( !( comparator instanceof Serializable ) )
+      throw new IllegalArgumentException( "given comparator must be serializable" );
+
+    if( comparators == null )
+      comparators = new Comparator[size()];
+
+    try
+      {
+      comparators[ getPos( fieldName ) ] = comparator;
+      }
+    catch( FieldsResolverException exception )
+      {
+      throw new IllegalArgumentException( "given field name was not found: " + fieldName, exception );
+      }
+    }
+
+  /**
+   * Method setComparators sets all the comparators of this FieldsComparator object. The Comparator array
+   * must be the same length as the number for fields in this instance.
+   *
+   * @param comparators the comparators of this FieldsComparator object.
+   */
+  public void setComparators( Comparator... comparators )
+    {
+    if( comparators.length != size() )
+      throw new IllegalArgumentException( "given number of comparator instances must match fields size" );
+
+    for( Comparator comparator : comparators )
+      {
+      if( !( comparator instanceof Serializable ) )
+        throw new IllegalArgumentException( "comparators must be serializable" );
+      }
+
+    this.comparators = comparators;
+    }
+
+  /**
+   * Method getComparators returns the comparators of this Fields object.
+   *
+   * @return the comparators (type Comparator[]) of this Fields object.
+   */
+  public Comparator[] getComparators()
+    {
+    Comparator[] copy = new Comparator[size()];
+
+    System.arraycopy( comparators, 0, copy, 0, size() );
+
+    return copy;
+    }
+
+  /**
+   * Method hasComparators test if this Fields instance has Comparators.
+   *
+   * @return boolean
+   */
+  public boolean hasComparators()
+    {
+    return comparators != null;
+    }
+
+  @Override
+  public int compare( Tuple lhs, Tuple rhs )
+    {
+    return lhs.compareTo( comparators, rhs );
     }
 
   @Override

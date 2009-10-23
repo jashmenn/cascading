@@ -24,10 +24,12 @@ package cascading;
 import java.io.File;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 import cascading.cascade.Cascades;
 import cascading.flow.Flow;
 import cascading.flow.FlowConnector;
+import cascading.operation.Debug;
 import cascading.operation.Filter;
 import cascading.operation.Function;
 import cascading.operation.Identity;
@@ -48,7 +50,7 @@ import cascading.pipe.cogroup.InnerJoin;
 import cascading.scheme.SequenceFile;
 import cascading.scheme.TextLine;
 import cascading.tap.Hfs;
-import cascading.tap.MultiTap;
+import cascading.tap.MultiSourceTap;
 import cascading.tap.Tap;
 import cascading.tuple.Fields;
 import cascading.tuple.Tuple;
@@ -196,6 +198,26 @@ public class FieldedPipesTest extends ClusterTestCase
     assertEquals( "not equal: tuple.get(1)", "75.185.76.245", iterator.next().get( 1 ) );
 
     iterator.close();
+    }
+
+  public void testCopy() throws Exception
+    {
+    if( !new File( inputFileApache ).exists() )
+      fail( "data file not found" );
+
+    copyFromLocal( inputFileApache );
+
+    Tap source = new Hfs( new TextLine( new Fields( "line" ) ), inputFileApache );
+
+    Pipe pipe = new Pipe( "test" );
+
+    Tap sink = new Hfs( new TextLine( 1 ), outputPath + "/copy", true );
+
+    Flow flow = new FlowConnector( getProperties() ).connect( source, sink, pipe );
+
+    flow.complete();
+
+    validateLength( flow, 10, null );
     }
 
   public void testSimpleMerge() throws Exception
@@ -449,8 +471,10 @@ public class FieldedPipesTest extends ClusterTestCase
     Pipe pipe = new Pipe( "test" );
 
     String regex = "^([^ ]*) +[^ ]* +[^ ]* +\\[([^]]*)\\] +\\\"([^ ]*) ([^ ]*) [^ ]*\\\" ([^ ]*) ([^ ]*).*$";
-    pipe = new Each( pipe, new Fields( "line" ), new RegexParser( new Fields( "ip", "time", "method", "event", "status", "size" ), regex, new int[]{
-      1, 2, 3, 4, 5, 6} ) );
+    Fields fieldDeclaration = new Fields( "ip", "time", "method", "event", "status", "size" );
+    int[] groups = {1, 2, 3, 4, 5, 6};
+    RegexParser function = new RegexParser( fieldDeclaration, regex, groups );
+    pipe = new Each( pipe, new Fields( "line" ), function );
 
     pipe = new Each( pipe, new Fields( "method" ), new RegexFilter( "^fobar" ) ); // intentionally filtering all
 
@@ -549,6 +573,51 @@ public class FieldedPipesTest extends ClusterTestCase
     Tap sink2 = new Hfs( new TextLine(), outputPath + "/split2", true );
 
     Pipe pipe = new Pipe( "split" );
+
+    pipe = new Each( pipe, new Fields( "line" ), new RegexFilter( "^68.*" ) );
+
+    Pipe left = new Each( new Pipe( "left", pipe ), new Fields( "line" ), new RegexFilter( ".*46.*" ) );
+    Pipe right = new Each( new Pipe( "right", pipe ), new Fields( "line" ), new RegexFilter( ".*102.*" ) );
+
+    Map sources = new HashMap();
+    sources.put( "split", source );
+
+    Map sinks = new HashMap();
+    sinks.put( "left", sink1 );
+    sinks.put( "right", sink2 );
+
+    Flow flow = new FlowConnector( getProperties() ).connect( sources, sinks, left, right );
+
+//    flow.writeDOT( "split.dot" );
+
+    flow.complete();
+
+    validateLength( flow, 1, "left" );
+    validateLength( flow, 2, "right" );
+    }
+
+  /**
+   * verifies non-safe rules apply in the proper place
+   *
+   * @throws Exception
+   */
+  public void testSplitNonSafe() throws Exception
+    {
+    if( !new File( inputFileApache ).exists() )
+      fail( "data file not found" );
+
+    copyFromLocal( inputFileApache );
+
+    // 46 192
+
+    Tap source = new Hfs( new TextLine( new Fields( "offset", "line" ) ), inputFileApache );
+    Tap sink1 = new Hfs( new TextLine(), outputPath + "/nonsafesplit1", true );
+    Tap sink2 = new Hfs( new TextLine(), outputPath + "/nonsafesplit2", true );
+
+    Pipe pipe = new Pipe( "split" );
+
+    // run job on non-safe operation, forces 3 mr jobs.
+    pipe = new Each( pipe, new TestFunction( new Fields( "ignore" ), new Tuple( 1 ), false ), new Fields( "line" ) );
 
     pipe = new Each( pipe, new Fields( "line" ), new RegexFilter( "^68.*" ) );
 
@@ -695,7 +764,7 @@ public class FieldedPipesTest extends ClusterTestCase
     Tap sourceLower = new Hfs( new TextLine( new Fields( "offset", "line" ) ), inputFileLower );
     Tap sourceUpper = new Hfs( new TextLine( new Fields( "offset", "line" ) ), inputFileUpper );
 
-    Tap source = new MultiTap( sourceLower, sourceUpper );
+    Tap source = new MultiSourceTap( sourceLower, sourceUpper );
 
     Function splitter = new RegexSplitter( new Fields( "num", "char" ), " " );
 
@@ -741,6 +810,96 @@ public class FieldedPipesTest extends ClusterTestCase
     flow.complete();
 
     validateLength( flow, 8 * 2 * 3, null );
+    }
+
+  /**
+   * If the sinks have the same scheme as a temp tap, replace the temp tap
+   *
+   * @throws Exception
+   */
+  public void testChainedTaps() throws Exception
+    {
+    if( !new File( inputFileApache ).exists() )
+      fail( "data file not found" );
+
+    copyFromLocal( inputFileApache );
+
+    Tap source = new Hfs( new TextLine( new Fields( "offset", "line" ) ), inputFileApache );
+
+    Pipe pipe = new Each( new Pipe( "first" ), new Fields( "line" ), new RegexParser( new Fields( "ip" ), "^[^ ]*" ), new Fields( "ip" ) );
+    pipe = new GroupBy( pipe, new Fields( "ip" ) );
+
+    pipe = new Each( new Pipe( "second", pipe ), new Fields( "ip" ), new RegexFilter( "7" ) );
+    pipe = new GroupBy( pipe, new Fields( "ip" ) );
+
+    pipe = new Each( new Pipe( "third", pipe ), new Fields( "ip" ), new RegexFilter( "6" ) );
+    pipe = new GroupBy( pipe, new Fields( "ip" ) );
+
+    String path = outputPath + "/chainedtaps/";
+    Tap sinkFirst = new Hfs( new SequenceFile( new Fields( "ip" ) ), path + "first", true );
+    Tap sinkSecond = new Hfs( new SequenceFile( new Fields( "ip" ) ), path + "second", true );
+    Tap sinkThird = new Hfs( new SequenceFile( new Fields( "ip" ) ), path + "third", true );
+
+    Map<String, Tap> sinks = Cascades.tapsMap( new String[]{"first", "second",
+                                                            "third"}, Tap.taps( sinkFirst, sinkSecond, sinkThird ) );
+
+    Flow flow = new FlowConnector( getProperties() ).connect( source, sinks, pipe );
+
+    assertEquals( "wrong number of steps", 3, flow.getSteps().size() );
+
+//    flow.writeDOT( "chainedtaps.dot" );
+
+    flow.complete();
+
+    validateLength( flow, 3, null );
+    }
+
+  public void testReplace() throws Exception
+    {
+    if( !new File( inputFileApache ).exists() )
+      fail( "data file not found" );
+
+    Tap source = new Hfs( new TextLine( new Fields( "offset", "line" ) ), inputFileApache );
+    Tap sink = new Hfs( new TextLine( new Fields( "offset", "line" ), new Fields( "offset", "line" ) ), outputPath + "/replace", true );
+
+    Pipe pipe = new Pipe( "test" );
+
+    Function parser = new RegexParser( new Fields( 0 ), "^[^ ]*" );
+    pipe = new Each( pipe, new Fields( "line" ), parser, Fields.REPLACE );
+    pipe = new Each( pipe, new Fields( "line" ), new Identity( Fields.ARGS ), Fields.REPLACE );
+    pipe = new Each( pipe, new Fields( "line" ), new Identity( new Fields( "line" ) ), Fields.REPLACE );
+
+    pipe = new Each( pipe, new Debug( true ) );
+
+    Flow flow = new FlowConnector().connect( source, sink, pipe );
+
+//    flow.writeDOT( "simple.dot" );
+
+    flow.complete();
+
+    validateLength( flow, 10, 2, Pattern.compile( "^\\d+\\s\\d+\\s[\\d]{1,3}\\.[\\d]{1,3}\\.[\\d]{1,3}\\.[\\d]{1,3}$" ) );
+    }
+
+  public void testSwap() throws Exception
+    {
+    if( !new File( inputFileApache ).exists() )
+      fail( "data file not found" );
+
+    Tap source = new Hfs( new TextLine( new Fields( "offset", "line" ) ), inputFileApache );
+    Tap sink = new Hfs( new TextLine( new Fields( "offset", "line" ), new Fields( "offset", "ip" ) ), outputPath + "/swap", true );
+
+    Pipe pipe = new Pipe( "test" );
+
+    Function parser = new RegexParser( new Fields( "ip" ), "^[^ ]*" );
+    pipe = new Each( pipe, new Fields( "line" ), parser, Fields.SWAP );
+
+    Flow flow = new FlowConnector().connect( source, sink, pipe );
+
+//    flow.writeDOT( "simple.dot" );
+
+    flow.complete();
+
+    validateLength( flow, 10, 2, Pattern.compile( "^\\d+\\s\\d+\\s[\\d]{1,3}\\.[\\d]{1,3}\\.[\\d]{1,3}\\.[\\d]{1,3}$" ) );
     }
 
   }

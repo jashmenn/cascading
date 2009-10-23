@@ -21,8 +21,17 @@
 
 package cascading.cascade;
 
+import java.io.IOException;
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.ListIterator;
+import java.util.Map;
+import java.util.Set;
+
 import cascading.flow.Flow;
-import cascading.tap.MultiTap;
+import cascading.tap.CompositeTap;
 import cascading.tap.Tap;
 import cascading.tuple.TupleEntryCollector;
 import cascading.tuple.TupleEntryIterator;
@@ -34,14 +43,6 @@ import org.jgrapht.Graphs;
 import org.jgrapht.graph.SimpleDirectedGraph;
 import org.jgrapht.traverse.TopologicalOrderIterator;
 
-import java.io.IOException;
-import java.util.Collection;
-import java.util.HashSet;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.ListIterator;
-import java.util.Set;
-
 /**
  * Class CascadeConnector is used to construct a new {@link Cascade} instance from a collection of {@link Flow} instance.
  * <p/>
@@ -52,6 +53,24 @@ public class CascadeConnector
   {
   /** Field LOG */
   private static final Logger LOG = Logger.getLogger( CascadeConnector.class );
+
+  /** Field properties */
+  private Map<Object, Object> properties;
+
+  /** Constructor CascadeConnector creates a new CascadeConnector instance. */
+  public CascadeConnector()
+    {
+    }
+
+  /**
+   * Constructor CascadeConnector creates a new CascadeConnector instance.
+   *
+   * @param properties of type Map<Object, Object>
+   */
+  public CascadeConnector( Map<Object, Object> properties )
+    {
+    this.properties = properties;
+    }
 
   /**
    * Given any number of {@link Flow} objects, it will connect them and return a new {@link Cascade} instance. The name
@@ -78,12 +97,13 @@ public class CascadeConnector
     name = name == null ? makeName( flows ) : name;
 
     SimpleDirectedGraph<Tap, Flow.FlowHolder> tapGraph = new SimpleDirectedGraph<Tap, Flow.FlowHolder>( Flow.FlowHolder.class );
-    SimpleDirectedGraph<Flow, Integer> jobGraph = new SimpleDirectedGraph<Flow, Integer>( Integer.class );
+    SimpleDirectedGraph<Flow, Integer> flowGraph = new SimpleDirectedGraph<Flow, Integer>( Integer.class );
 
     makeTapGraph( tapGraph, flows );
-    makeFlowGraph( jobGraph, tapGraph );
+    makeFlowGraph( flowGraph, tapGraph );
 
-    return new Cascade( name, jobGraph );
+
+    return new Cascade( name, flowGraph );
     }
 
   private void verifyUniqueFlowNames( Flow[] flows )
@@ -122,11 +142,11 @@ public class CascadeConnector
         {
         Tap source = iterator.next();
 
-        if( source instanceof MultiTap )
+        if( source instanceof CompositeTap )
           {
           iterator.remove();
 
-          for( Tap tap : ( (MultiTap) source ).getTaps() )
+          for( Tap tap : ( (CompositeTap) source ).getChildTaps() )
             iterator.add( tap );
           }
         }

@@ -21,16 +21,11 @@
 
 package cascading.tap;
 
-import java.io.File;
-import java.io.IOException;
-import java.io.Serializable;
-import java.net.URI;
-import java.net.URISyntaxException;
-
 import cascading.ClusterTestCase;
 import cascading.flow.Flow;
 import cascading.flow.FlowConnector;
 import cascading.flow.MultiMapReducePlanner;
+import cascading.operation.Function;
 import cascading.operation.Identity;
 import cascading.operation.regex.RegexSplitter;
 import cascading.pipe.Each;
@@ -41,6 +36,12 @@ import cascading.tuple.Fields;
 import cascading.tuple.Tuple;
 import cascading.tuple.TupleEntryIterator;
 
+import java.io.File;
+import java.io.IOException;
+import java.io.Serializable;
+import java.net.URI;
+import java.net.URISyntaxException;
+
 /**
  *
  */
@@ -49,6 +50,8 @@ public class TapTest extends ClusterTestCase implements Serializable
   String inputFileComments = "build/test/data/comments+lower.txt";
   String inputFileJoined = "build/test/data/lower+upper.txt";
   String inputFileCross = "build/test/data/lhs+rhs-cross.txt";
+  String inputFileUpper = "build/test/data/upper.txt";
+  String inputFileLower = "build/test/data/lower.txt";
 
   String outputPath = "build/test/output/tap/";
 
@@ -274,4 +277,56 @@ public class TapTest extends ClusterTestCase implements Serializable
     iterator.close();
     }
 
+  public void testMultiSinkTap() throws IOException
+    {
+    if( !new File( inputFileJoined ).exists() )
+      fail( "data file not found" );
+
+    copyFromLocal( inputFileJoined );
+
+    Tap source = new Hfs( new TextLine( new Fields( "line" ) ), inputFileJoined );
+
+    Pipe pipe = new Pipe( "test" );
+
+    pipe = new Each( pipe, new RegexSplitter( new Fields( "number", "lower", "upper" ), "\t" ) );
+
+    Tap lhsSink = new Hfs( new TextLine( new Fields( "offset", "line" ), new Fields( "number", "lower" ) ), outputPath + "/multisink/lhs", SinkMode.REPLACE );
+    Tap rhsSink = new Hfs( new TextLine( new Fields( "offset", "line" ), new Fields( "number", "upper" ) ), outputPath + "/multisink/rhs", SinkMode.REPLACE );
+
+    Tap sink = new MultiSinkTap( lhsSink, rhsSink );
+
+    Flow flow = new FlowConnector( getProperties() ).connect( source, sink, pipe );
+
+    flow.complete();
+
+    validateLength( flow.openTapForRead( lhsSink ), 5 );
+    validateLength( flow.openTapForRead( rhsSink ), 5 );
+    }
+
+  public void testGlobHfs() throws Exception
+    {
+    if( !new File( inputFileLower ).exists() )
+      fail( "data file not found" );
+
+    copyFromLocal( inputFileLower );
+    copyFromLocal( inputFileUpper );
+
+    Tap source = new GlobHfs( new TextLine( new Fields( "offset", "line" ) ), "build/test/data/{upper,lower}.txt" );
+
+    Function splitter = new RegexSplitter( new Fields( "num", "char" ), " " );
+
+    // using null pos so all fields are written
+    Tap sink = new Hfs( new TextLine(), outputPath + "/glob/", true );
+
+    Pipe pipe = new Each( new Pipe( "concat" ), new Fields( "line" ), splitter );
+
+    Flow countFlow = new FlowConnector( getProperties() ).connect( source, sink, pipe );
+
+//    countFlow.writeDOT( "cogroup.dot" );
+//    System.out.println( "countFlow =\n" + countFlow );
+
+    countFlow.complete();
+
+    validateLength( countFlow, 10, null );
+    }
   }

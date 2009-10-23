@@ -28,6 +28,7 @@ import cascading.tap.Tap;
 import cascading.tuple.Fields;
 import cascading.tuple.Tuple;
 import cascading.tuple.TupleEntry;
+import cascading.util.Util;
 import org.apache.hadoop.mapred.JobConf;
 import org.apache.hadoop.mapred.OutputCollector;
 
@@ -54,6 +55,8 @@ public abstract class Scheme implements Serializable
   Fields sourceFields = Fields.UNKNOWN;
   /** Field numSinkParts */
   int numSinkParts;
+  /** Field trace */
+  private String trace = Util.captureDebugTrace( getClass() );
 
   /** Constructor Scheme creates a new Scheme instance. */
   protected Scheme()
@@ -169,6 +172,16 @@ public abstract class Scheme implements Serializable
     }
 
   /**
+   * Method getTrace returns a String that pinpoint where this instance was created for debugging.
+   *
+   * @return String
+   */
+  public String getTrace()
+    {
+    return trace;
+    }
+
+  /**
    * Method isWriteDirect returns true if the parent {@link Tap} instances {@link cascading.tuple.TupleEntryCollector} should be used to sink values.
    *
    * @return the writeDirect (type boolean) of this Tap object.
@@ -176,6 +189,17 @@ public abstract class Scheme implements Serializable
   public boolean isWriteDirect()
     {
     return false;
+    }
+
+  /**
+   * Method isSymetrical returns {@code true} if the sink fields equal the source fields. That is, this
+   * scheme sources the same fields as it sinks.
+   *
+   * @return the symetrical (type boolean) of this Scheme object.
+   */
+  public boolean isSymetrical()
+    {
+    return getSinkFields().equals( getSourceFields() );
     }
 
   /**

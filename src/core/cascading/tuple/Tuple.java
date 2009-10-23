@@ -21,13 +21,19 @@
 
 package cascading.tuple;
 
+import java.io.Serializable;
+import java.io.StringReader;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.Formatter;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Scanner;
+
 import cascading.operation.Aggregator;
 import cascading.pipe.Pipe;
 import cascading.util.Util;
-
-import java.io.Serializable;
-import java.io.StringReader;
-import java.util.*;
 
 /**
  * A Tuple represents a set of values. Consider a Tuple the same as a data base record where every value is a column in that table.
@@ -56,7 +62,7 @@ public class Tuple implements Comparable, Iterable, Serializable
   /** Field isUnmodifiable */
   protected boolean isUnmodifiable = false;
   /** Field elements */
-  protected List<Comparable> elements;
+  protected List<Object> elements;
   /** Field printDelim */
   private final String printDelim = "\t";
 
@@ -135,12 +141,12 @@ public class Tuple implements Comparable, Iterable, Serializable
    * @param tuple of type Tuple
    * @return List<Comparable>
    */
-  static List<Comparable> elements( Tuple tuple )
+  static List<Object> elements( Tuple tuple )
     {
     return tuple.elements;
     }
 
-  protected Tuple( List<Comparable> elements )
+  protected Tuple( List<Object> elements )
     {
     this.elements = elements;
     }
@@ -148,22 +154,11 @@ public class Tuple implements Comparable, Iterable, Serializable
   /** Constructor Tuple creates a new Tuple instance. */
   public Tuple()
     {
-    this( new ArrayList<Comparable>() );
+    this( new ArrayList<Object>() );
     }
 
   /**
-   * Constructor Tuple creates a new Tuple instance with a single String value.
-   *
-   * @param value of type String
-   */
-  public Tuple( String value )
-    {
-    this();
-    elements.add( value );
-    }
-
-  /**
-   * Copy constructor. Does not nest the given Tuple instance within this new instance. Use {@link #add(Comparable)}.
+   * Copy constructor. Does not nest the given Tuple instance within this new instance. Use {@link #add(Object)}.
    *
    * @param tuple of type Tuple
    */
@@ -176,9 +171,9 @@ public class Tuple implements Comparable, Iterable, Serializable
   /**
    * Constructor Tuple creates a new Tuple instance with all the given values.
    *
-   * @param values of type Comparable...
+   * @param values of type Object...
    */
-  public Tuple( Comparable... values )
+  public Tuple( Object... values )
     {
     this();
     Collections.addAll( elements, values );
@@ -196,11 +191,24 @@ public class Tuple implements Comparable, Iterable, Serializable
 
   /**
    * Method get returns the element at the given position i.
+   * <p/>
+   * This method assumes the element implements {@link Comparable} in order to maintain backwards compatibility.
    *
    * @param pos of type int
    * @return Comparable
    */
   public Comparable get( int pos )
+    {
+    return (Comparable) elements.get( pos );
+    }
+
+  /**
+   * Method get returns the element at the given position i.
+   *
+   * @param pos of type int
+   * @return Comparable
+   */
+  public Object getObject( int pos )
     {
     return elements.get( pos );
     }
@@ -377,7 +385,7 @@ public class Tuple implements Comparable, Iterable, Serializable
 
     Tuple results = remove( pos );
 
-    List<Comparable> temp = results.elements;
+    List<Object> temp = results.elements;
     results.elements = this.elements;
     this.elements = temp;
 
@@ -387,9 +395,9 @@ public class Tuple implements Comparable, Iterable, Serializable
   /**
    * Method add adds a new element value to this instance.
    *
-   * @param value of type Comparable
+   * @param value of type Object
    */
-  public void add( Comparable value )
+  public void add( Object value )
     {
     verifyModifiable();
 
@@ -399,9 +407,9 @@ public class Tuple implements Comparable, Iterable, Serializable
   /**
    * Method addAll adds all given values to this instance.
    *
-   * @param values of type Comparable...
+   * @param values of type Object...
    */
-  public void addAll( Comparable... values )
+  public void addAll( Object... values )
     {
     verifyModifiable();
 
@@ -428,9 +436,9 @@ public class Tuple implements Comparable, Iterable, Serializable
    * Method set sets the given value to the given index position in this instance.
    *
    * @param index of type int
-   * @param value of type Comparable
+   * @param value of type Object
    */
-  public void set( int index, Comparable value )
+  public void set( int index, Object value )
     {
     verifyModifiable();
 
@@ -607,7 +615,7 @@ public class Tuple implements Comparable, Iterable, Serializable
 
     for( int i = 0; i < elements.size(); i++ )
       {
-      Comparable value = elements.get( i );
+      Object value = elements.get( i );
 
       if( value != null )
         types[ i ] = value.getClass();
@@ -648,8 +656,8 @@ public class Tuple implements Comparable, Iterable, Serializable
 
     for( int i = 0; i < this.elements.size(); i++ )
       {
-      Comparable lhs = this.elements.get( i );
-      Comparable rhs = other.elements.get( i );
+      Comparable lhs = (Comparable) this.elements.get( i );
+      Comparable rhs = (Comparable) other.elements.get( i );
 
       if( lhs == null && rhs == null )
         continue;
@@ -660,6 +668,45 @@ public class Tuple implements Comparable, Iterable, Serializable
         return 1;
 
       int c = lhs.compareTo( rhs ); // guaranteed to not be null
+      if( c != 0 )
+        return c;
+      }
+
+    return 0;
+    }
+
+  public int compareTo( Comparator[] comparators, Tuple other )
+    {
+    if( comparators == null )
+      return compareTo( other );
+
+    if( other == null || other.elements == null )
+      return 1;
+
+    if( other.elements.size() != this.elements.size() )
+      return this.elements.size() - other.elements.size();
+
+    if( comparators.length != this.elements.size() )
+      throw new IllegalArgumentException( "comparator array not same size as tuple elements" );
+
+    for( int i = 0; i < this.elements.size(); i++ )
+      {
+      Object lhs = this.elements.get( i );
+      Object rhs = other.elements.get( i );
+
+      int c = 0;
+
+      if( comparators[ i ] != null )
+        c = comparators[ i ].compare( lhs, rhs );
+      else if( lhs == null && rhs == null )
+        c = 0;
+      else if( lhs == null && rhs != null )
+          return -1;
+        else if( lhs != null && rhs == null )
+            return 1;
+          else
+            c = ( (Comparable) lhs ).compareTo( (Comparable) rhs ); // guaranteed to not be null
+
       if( c != 0 )
         return c;
       }
@@ -695,8 +742,8 @@ public class Tuple implements Comparable, Iterable, Serializable
 
     for( int i = 0; i < this.elements.size(); i++ )
       {
-      Comparable lhs = this.elements.get( i );
-      Comparable rhs = other.elements.get( i );
+      Object lhs = this.elements.get( i );
+      Object rhs = other.elements.get( i );
 
       if( lhs == null && rhs == null )
         continue;
@@ -716,7 +763,7 @@ public class Tuple implements Comparable, Iterable, Serializable
     {
     int hash = 1;
 
-    for( Comparable element : elements )
+    for( Object element : elements )
       hash = 31 * hash + ( element != null ? element.hashCode() : 0 );
 
     return hash;
@@ -765,7 +812,7 @@ public class Tuple implements Comparable, Iterable, Serializable
     buffer.append( "[" );
     for( int i = 0; i < elements.size(); i++ )
       {
-      Comparable element = elements.get( i );
+      Object element = elements.get( i );
 
       if( element instanceof Tuple )
         ( (Tuple) element ).print( buffer );

@@ -32,9 +32,10 @@ import cascading.flow.Scope;
 import cascading.pipe.Pipe;
 import cascading.scheme.Scheme;
 import cascading.tuple.Fields;
+import cascading.tuple.FieldsResolverException;
 import cascading.tuple.Tuple;
-import cascading.tuple.TupleEntryCollector;
 import cascading.tuple.TupleEntry;
+import cascading.tuple.TupleEntryCollector;
 import cascading.tuple.TupleEntryIterator;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.mapred.JobConf;
@@ -263,7 +264,15 @@ public abstract class Tap implements FlowElement, Serializable
 
       if( incomingFields != null )
         {
-        incomingFields.verifyContains( getSinkFields() );
+        try
+          {
+          incomingFields.select( getSinkFields() );
+          }
+        catch( FieldsResolverException exception )
+          {
+          throw new TapException( this, exception.getSourceFields(), exception.getSelectorFields(), exception );
+          }
+
         count++;
         }
       }
@@ -373,9 +382,21 @@ public abstract class Tap implements FlowElement, Serializable
    *
    * @return boolean
    */
+  @Deprecated
   public boolean isAppend()
     {
     return sinkMode == SinkMode.APPEND;
+    }
+
+  /**
+   * Method isUpdate indicates whether the resrouce represented by this instance should be updated if it already
+   * exists. Otherwise a new resource will be created when the Flow is started..
+   *
+   * @return boolean
+   */
+  public boolean isUpdate()
+    {
+    return isAppend() || sinkMode == SinkMode.UPDATE;
     }
 
   /**

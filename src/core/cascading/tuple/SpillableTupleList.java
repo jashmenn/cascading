@@ -21,20 +21,22 @@
 
 package cascading.tuple;
 
-import cascading.tuple.hadoop.TupleSerialization;
-import org.apache.hadoop.mapred.JobConf;
-import org.apache.log4j.Logger;
-
 import java.io.Closeable;
 import java.io.File;
 import java.io.FileInputStream;
-import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.Flushable;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
+
+import cascading.tuple.hadoop.TupleSerialization;
+import org.apache.hadoop.io.compress.CompressionCodec;
+import org.apache.hadoop.mapred.JobConf;
+import org.apache.log4j.Logger;
 
 /**
  * SpillableTupleList is a simple {@link Iterable} object that can store an unlimited number of {@link Tuple} instances by spilling
@@ -47,6 +49,8 @@ public class SpillableTupleList implements Iterable<Tuple>
 
   /** Field threshold */
   private long threshold = 10000;
+  /** Field codec */
+  private CompressionCodec codec = null;
   /** Field files */
   private List<File> files = new LinkedList<File>();
   /** Field current */
@@ -73,10 +77,21 @@ public class SpillableTupleList implements Iterable<Tuple>
     this.threshold = threshold;
     }
 
-  public SpillableTupleList( long threshold, JobConf conf )
+  /**
+   * Constructor SpillableTupleList creates a new SpillableTupleList instance using the given threshold value, and
+   * the first available compression codec, if any.
+   *
+   * @param threshold of type long
+   * @param conf
+   * @param codec     of type CompressionCodec
+   */
+  public SpillableTupleList( long threshold, JobConf conf, CompressionCodec codec )
     {
     this.threshold = threshold;
-    this.tupleSerialization = new TupleSerialization( conf );
+    this.codec = codec;
+
+    if( conf != null )
+      tupleSerialization = new TupleSerialization( conf );
     }
 
   /**
@@ -192,14 +207,21 @@ public class SpillableTupleList implements Iterable<Tuple>
 
   private TupleOutputStream createTupleOutputStream( File file )
     {
+    OutputStream outputStream;
+
     try
       {
-      if( tupleSerialization == null )
-        return new TupleOutputStream( new FileOutputStream( file ) );
+      if( codec == null )
+        outputStream = new FileOutputStream( file );
       else
-        return new TupleOutputStream( new FileOutputStream( file ), tupleSerialization.getElementWriter() );
+        outputStream = codec.createOutputStream( new FileOutputStream( file ) );
+
+      if( tupleSerialization == null )
+        return new TupleOutputStream( outputStream );
+      else
+        return new TupleOutputStream( outputStream, tupleSerialization.getElementWriter() );
       }
-    catch( FileNotFoundException exception )
+    catch( IOException exception )
       {
       throw new TupleException( "unable to create temporary file input stream", exception );
       }
@@ -227,12 +249,19 @@ public class SpillableTupleList implements Iterable<Tuple>
     {
     try
       {
-      if( tupleSerialization == null )
-        return new TupleInputStream( new FileInputStream( file ) );
+      InputStream inputStream;
+
+      if( codec == null )
+        inputStream = new FileInputStream( file );
       else
-        return new TupleInputStream( new FileInputStream( file ), tupleSerialization.getElementReader() );
+        inputStream = codec.createInputStream( new FileInputStream( file ) );
+
+      if( tupleSerialization == null )
+        return new TupleInputStream( inputStream, false );
+      else
+        return new TupleInputStream( inputStream, tupleSerialization.getElementReader( false ) );
       }
-    catch( FileNotFoundException exception )
+    catch( IOException exception )
       {
       throw new TupleException( "unable to create temporary file output stream", exception );
       }
@@ -253,6 +282,13 @@ public class SpillableTupleList implements Iterable<Tuple>
       }
     }
 
+  /** Method clear empties this container so it may be re-used. */
+  public void clear()
+    {
+    files.clear();
+    current.clear();
+    size = 0;
+    }
 
   /**
    * Method iterator returns a Tuple Iterator of all the values in this collection.

@@ -21,14 +21,32 @@
 
 package cascading.stats;
 
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
+
 import cascading.flow.Flow;
 
 
 /** Class FlowStats collects {@link Flow} specific statistics. */
 public class FlowStats extends CascadingStats
   {
-  /** Field stepsCount */
-  int stepsCount;
+  List<StepStats> stepStatsList = new ArrayList<StepStats>();
+
+  public void addStepStats( StepStats stepStats )
+    {
+    stepStatsList.add( stepStats );
+    }
+
+  /**
+   * Method getStepStats returns the stepStats owned by this FlowStats.
+   *
+   * @return the stepStats (type List<StepStats>) of this FlowStats object.
+   */
+  public List<StepStats> getStepStats()
+    {
+    return stepStatsList;
+    }
 
   /**
    * Method getStepsCount returns the number of steps this Flow executed.
@@ -37,23 +55,36 @@ public class FlowStats extends CascadingStats
    */
   public int getStepsCount()
     {
-    return stepsCount;
+    return stepStatsList.size();
     }
 
-  /**
-   * Method setStepsCount sets the steps value.
-   *
-   * @param stepsCount the stepsCount of this FlowStats object.
-   */
-  public void setStepsCount( int stepsCount )
+  @Override
+  public long getCounterValue( Enum counter )
     {
-    this.stepsCount = stepsCount;
+    long value = 0;
+
+    for( StepStats step : stepStatsList )
+      value += step.getCounterValue( counter );
+
+    return value;
+    }
+
+  @Override
+  public void captureDetail()
+    {
+    for( StepStats stepStats : stepStatsList )
+      stepStats.captureDetail();
+    }
+
+  public Collection getChildren()
+    {
+    return getStepStats();
     }
 
   @Override
   protected String getStatsString()
     {
-    return super.getStatsString() + ", stepsCount=" + stepsCount;
+    return super.getStatsString() + ", stepsCount=" + getStepsCount();
     }
 
   @Override

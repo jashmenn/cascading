@@ -21,6 +21,8 @@
 
 package cascading.stats;
 
+import java.util.Collection;
+
 /**
  * Class CascadingStats is the base class for all Cascading statistics gathering. It also reports the status of
  * core elements that have state.
@@ -36,12 +38,13 @@ package cascading.stats;
  * <code>failed</code>, or <code>stopped</code> is true.</li>
  * </ul>
  *
- * @see FlowStats
  * @see CascadeStats
+ * @see FlowStats
+ * @see StepStats
  */
-public class CascadingStats
+public abstract class CascadingStats
   {
-  enum Status
+  public enum Status
     {
       PENDING, RUNNING, SUCCESSFUL, FAILED, STOPPED;
     }
@@ -121,6 +124,16 @@ public class CascadingStats
     return status == Status.STOPPED;
     }
 
+  /**
+   * Method getStatus returns the status of this CascadingStats object.
+   *
+   * @return the status (type Status) of this CascadingStats object.
+   */
+  public Status getStatus()
+    {
+    return status;
+    }
+
   /** Method markRunning sets the status to running. */
   public void markRunning()
     {
@@ -177,6 +190,16 @@ public class CascadingStats
     }
 
   /**
+   * Method getStartTime returns the startTime of this CascadingStats object.
+   *
+   * @return the startTime (type long) of this CascadingStats object.
+   */
+  public long getStartTime()
+    {
+    return startTime;
+    }
+
+  /**
    * Method getDuration returns the duration the work executed before being finished.
    *
    * @return the duration (type long) of this CascadingStats object.
@@ -188,6 +211,24 @@ public class CascadingStats
     else
       return 0;
     }
+
+  /**
+   * Method getCounter returns the current value for the given counter Enum.
+   *
+   * @param counter of type Enum
+   * @return the current counter value
+   */
+  public abstract long getCounterValue( Enum counter );
+
+  /**
+   * Method captureDetail will recursively capture details about nested systems. Use this method to persist
+   * statistics about a given Cascade, Flow, or FlowStep.
+   * <p/>
+   * Each CascadingStats object must be individually inspected for any system specific details.
+   */
+  public abstract void captureDetail();
+
+  public abstract Collection getChildren();
 
   protected String getStatsString()
     {

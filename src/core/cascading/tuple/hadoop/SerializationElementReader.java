@@ -38,10 +38,17 @@ public class SerializationElementReader implements TupleInputStream.ElementReade
   /** Field LOG */
   private static final Logger LOG = Logger.getLogger( SerializationElementReader.class );
 
+  /** Field tupleSerialization */
   private final TupleSerialization tupleSerialization;
 
+  /** Field deserializers */
   Map<String, Deserializer> deserializers = new HashMap<String, Deserializer>();
 
+  /**
+   * Constructor SerializationElementReader creates a new SerializationElementReader instance.
+   *
+   * @param tupleSerialization of type TupleSerialization
+   */
   public SerializationElementReader( TupleSerialization tupleSerialization )
     {
     this.tupleSerialization = tupleSerialization;
@@ -49,7 +56,7 @@ public class SerializationElementReader implements TupleInputStream.ElementReade
     tupleSerialization.initTokenMaps();
     }
 
-  public Comparable read( int token, DataInputStream inputStream ) throws IOException
+  public Object read( int token, DataInputStream inputStream ) throws IOException
     {
     String className = tupleSerialization.getClassNameFor( token );
 
@@ -65,9 +72,12 @@ public class SerializationElementReader implements TupleInputStream.ElementReade
       deserializers.put( className, deserializer );
       }
 
+    Object foundObject = null;
+    Object object = null;
+
     try
       {
-      return (Comparable) deserializer.deserialize( null );
+      object = deserializer.deserialize( foundObject );
       }
     catch( IOException exception )
       {
@@ -75,6 +85,8 @@ public class SerializationElementReader implements TupleInputStream.ElementReade
 
       throw exception;
       }
+
+    return object;
     }
 
   public void close()

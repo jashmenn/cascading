@@ -21,10 +21,10 @@
 
 package cascading.flow;
 
-import java.io.IOException;
-
 import cascading.tap.Tap;
 import org.apache.hadoop.mapred.JobConf;
+
+import java.io.IOException;
 
 /** Class MapReduceFlowStep wraps a {@link JobConf} and allows it to be executed as a {@link Flow}. */
 public class MapReduceFlowStep extends FlowStep
@@ -34,13 +34,13 @@ public class MapReduceFlowStep extends FlowStep
 
   MapReduceFlowStep( String name, JobConf jobConf, Tap sink )
     {
-    super( name );
+    super( name, 1 );
     this.jobConf = jobConf;
     this.sink = sink;
     }
 
   @Override
-  JobConf getJobConf( JobConf parentConf ) throws IOException
+  protected JobConf getJobConf( JobConf parentConf ) throws IOException
     {
     // allow to delete
     sink.sinkInit( new JobConf() );

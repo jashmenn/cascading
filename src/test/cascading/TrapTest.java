@@ -21,14 +21,12 @@
 
 package cascading;
 
-import java.io.File;
-import java.io.IOException;
-import java.util.Map;
-
 import cascading.cascade.Cascades;
 import cascading.flow.Flow;
 import cascading.flow.FlowConnector;
+import cascading.operation.AssertionLevel;
 import cascading.operation.aggregator.Count;
+import cascading.operation.assertion.AssertNotEquals;
 import cascading.operation.regex.RegexParser;
 import cascading.pipe.Each;
 import cascading.pipe.Every;
@@ -40,6 +38,10 @@ import cascading.tap.Hfs;
 import cascading.tap.Tap;
 import cascading.tuple.Fields;
 import cascading.tuple.Tuple;
+
+import java.io.File;
+import java.io.IOException;
+import java.util.Map;
 
 /**
  *
@@ -213,6 +215,46 @@ public class TrapTest extends ClusterTestCase
 
     Tap sink = new Hfs( new TextLine(), outputPath + "allchain/tap", true );
     Tap trap = new Hfs( new TextLine(), outputPath + "allchain/trap", true );
+
+    Flow flow = new FlowConnector( getProperties() ).connect( "trap test", source, sink, trap, pipe );
+
+//    flow.writeDOT( "traps.dot" );
+
+    flow.complete();
+
+    validateLength( flow, 6, null );
+    validateLength( flow.openTrap(), 4 );
+    }
+
+
+  /**
+   * This test verifies traps can cross m/r and step boundaries.
+   *
+   * @throws Exception
+   */
+  public void testTrapEachEveryAllChained() throws Exception
+    {
+    if( !new File( inputFileApache ).exists() )
+      fail( "data file not found" );
+
+    copyFromLocal( inputFileApache );
+
+    Tap source = new Hfs( new TextLine( new Fields( "offset", "line" ) ), inputFileApache );
+
+    Pipe pipe = new Pipe( "map" );
+
+    pipe = new Each( pipe, new Fields( "line" ), new RegexParser( new Fields( "ip" ), "^[^ ]*" ), new Fields( "ip" ) );
+
+    // always fail
+    pipe = new Each( pipe, AssertionLevel.VALID, new AssertNotEquals( "75.185.76.245" ) );
+    pipe = new GroupBy( pipe, new Fields( "ip" ) );
+    pipe = new Each( pipe, AssertionLevel.VALID, new AssertNotEquals( "68.46.103.112" ) );
+    pipe = new GroupBy( pipe, new Fields( "ip" ) );
+    pipe = new Each( pipe, AssertionLevel.VALID, new AssertNotEquals( "76.197.151.0" ) );
+    pipe = new Each( pipe, AssertionLevel.VALID, new AssertNotEquals( "12.215.138.88" ) );
+
+    Tap sink = new Hfs( new TextLine(), outputPath + "eacheverychain/tap", true );
+    Tap trap = new Hfs( new TextLine(), outputPath + "eacheverychain/trap", true );
 
     Flow flow = new FlowConnector( getProperties() ).connect( "trap test", source, sink, trap, pipe );
 

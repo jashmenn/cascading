@@ -21,6 +21,11 @@
 
 package cascading;
 
+import java.io.File;
+import java.io.IOException;
+import java.util.HashMap;
+import java.util.Map;
+
 import cascading.flow.Flow;
 import cascading.flow.MultiMapReducePlanner;
 import org.apache.hadoop.conf.Configuration;
@@ -30,11 +35,6 @@ import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hdfs.MiniDFSCluster;
 import org.apache.hadoop.mapred.JobConf;
 import org.apache.hadoop.mapred.MiniMRCluster;
-
-import java.io.File;
-import java.io.IOException;
-import java.util.HashMap;
-import java.util.Map;
 
 /**
  *
@@ -83,6 +83,11 @@ public class ClusterTestCase extends CascadingTestCase
     {
     }
 
+  public boolean isEnableCluster()
+    {
+    return enableCluster;
+    }
+
   public void setUp() throws IOException
     {
     if( jobConf != null )
@@ -106,8 +111,8 @@ public class ClusterTestCase extends CascadingTestCase
       jobConf = mr.createJobConf();
 
       jobConf.set( "mapred.child.java.opts", "-Xmx512m" );
-      jobConf.set( "mapred.map.tasks.speculative.execution", "false" );
-      jobConf.set( "mapred.reduce.tasks.speculative.execution", "false" );
+      jobConf.setMapSpeculativeExecution( false );
+      jobConf.setReduceSpeculativeExecution( false );
       }
 
     jobConf.setNumMapTasks( numMapTasks );

@@ -21,11 +21,14 @@
 
 package cascading.cascade;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Properties;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -73,7 +76,11 @@ public class Cascade implements Runnable
   {
   /** Field LOG */
   private static final Logger LOG = Logger.getLogger( Cascade.class );
+  /** Field versionProperties */
+  private static Properties versionProperties;
 
+  /** Field id */
+  private String id;
   /** Field name */
   private String name;
   /** Field jobGraph */
@@ -97,6 +104,8 @@ public class Cascade implements Runnable
     {
     this.name = name;
     this.jobGraph = jobGraph;
+
+    setIDOnFlow();
     }
 
   /**
@@ -110,6 +119,22 @@ public class Cascade implements Runnable
     }
 
   /**
+   * Method getID returns the ID of this Cascade object.
+   * <p/>
+   * The ID value is a long HEX String used to identify this instance globally. Subsequent Cascade
+   * instances created with identical paramers will not return the same ID.
+   *
+   * @return the ID (type String) of this Cascade object.
+   */
+  public String getID()
+    {
+    if( id == null )
+      id = Util.createUniqueID( getName() );
+
+    return id;
+    }
+
+  /**
    * Method getCascadeStats returns the cascadeStats of this Cascade object.
    *
    * @return the cascadeStats (type CascadeStats) of this Cascade object.
@@ -117,6 +142,12 @@ public class Cascade implements Runnable
   public CascadeStats getCascadeStats()
     {
     return cascadeStats;
+    }
+
+  private void setIDOnFlow()
+    {
+    for( Flow flow : getFlows() )
+      flow.setProperty( "cascading.cascade.id", getID() );
     }
 
   /**
@@ -223,6 +254,8 @@ public class Cascade implements Runnable
   /** Method run implements the Runnable run method. */
   public void run()
     {
+    printBanner();
+
     if( LOG.isInfoEnabled() )
       logInfo( "starting" );
 
@@ -363,6 +396,33 @@ public class Cascade implements Runnable
   private void logWarn( String message, Throwable throwable )
     {
     LOG.warn( "[" + Util.truncate( getName(), 25 ) + "] " + message, throwable );
+    }
+
+  public static synchronized void printBanner()
+    {
+    if( versionProperties != null )
+      return;
+
+    InputStream stream = Cascade.class.getClassLoader().getResourceAsStream( "cascading/version.properties" );
+
+    if( stream == null )
+      return;
+
+    try
+      {
+      versionProperties = new Properties();
+      versionProperties.load( stream );
+
+      String releaseVersion = (String) versionProperties.get( "cascading.release.version" );
+      String hadoopVersion = (String) versionProperties.get( "cascading.hadoop.compatible.version" );
+      String message = String.format( "Concurrent, Inc - Cascading %s [%s]", releaseVersion, hadoopVersion );
+
+      LOG.info( message );
+      }
+    catch( IOException exception )
+      {
+      LOG.warn( "unable to load version information", exception );
+      }
     }
 
   /** Class CascadeJob manages Flow execution in the current Cascade instance. */

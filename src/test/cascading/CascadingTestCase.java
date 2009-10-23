@@ -106,13 +106,13 @@ public class CascadingTestCase extends TestCase
     int count = 0;
     while( iterator.hasNext() )
       {
-      TupleEntry tuple = iterator.next();
+      TupleEntry tupleEntry = iterator.next();
 
       if( size != -1 )
-        assertEquals( "wrong number of elements", size, tuple.size() );
+        assertEquals( "wrong number of elements", size, tupleEntry.size() );
 
       if( regex != null )
-        assertTrue( "regex: " + regex + " does not match: " + tuple.getTuple().toString(), regex.matcher( tuple.getTuple().toString() ).matches() );
+        assertTrue( "regex: " + regex + " does not match: " + tupleEntry.getTuple().toString(), regex.matcher( tupleEntry.getTuple().toString() ).matches() );
 
       count++;
       }

@@ -25,6 +25,7 @@
 
   <dirname property="cascading.basedir" file="${ant.file.cascading}"/>
 
+  <property name="build.number" value="dev"/>
   <property file="${user.home}/build.properties"/>
   <property file="${cascading.basedir}/version.properties"/>
   <property file="${cascading.basedir}/build.properties"/>
@@ -158,6 +159,8 @@
     <javac srcdir="${src.core}" destdir="${build.core}" verbose="off" debug="${javac.debug}">
       <classpath refid="project.class.path"/>
     </javac>
+
+    <copy todir="${build.core}/cascading" file="${cascading.basedir}/version.properties"/>
 
     <copy todir="${build.core}">
       <fileset dir="${src.core}">
@@ -376,6 +379,7 @@
   </target>
 
   <target name="dist" depends="jar,javadoc">
+    <echo message="creating version: ${cascading.release.version}"/>
     <mkdir dir="${dist}"/>
 
     <copy todir="${dist}">
@@ -414,6 +418,12 @@
         <include name="**/**"/>
       </tarfileset>
     </tar>
+  </target>
+
+  <target name="push-package" unless="${package.remote.path}">
+    <property name="package.remote.port" value="22"/>
+    <scp file="${tar.cascading}" todir="${package.remote.path}" keyfile="${package.remote.keyfile}"
+         passphrase="" port="${package.remote.port}" trust="true"/>
   </target>
 
 </project>

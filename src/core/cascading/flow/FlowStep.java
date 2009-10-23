@@ -24,62 +24,55 @@ package cascading.flow;
 import cascading.operation.Operation;
 import cascading.pipe.Group;
 import cascading.pipe.Operator;
+import cascading.pipe.Pipe;
 import cascading.tap.Tap;
 import cascading.tap.TempHfs;
 import cascading.tap.hadoop.Hadoop18TapUtil;
 import cascading.tap.hadoop.MultiInputFormat;
 import cascading.tap.hadoop.TapIterator;
-import cascading.tuple.IndexTuple;
-import cascading.tuple.Tuple;
-import cascading.tuple.TupleEntryIterator;
-import cascading.tuple.TuplePair;
-import cascading.tuple.hadoop.GroupingComparator;
-import cascading.tuple.hadoop.GroupingPartitioner;
-import cascading.tuple.hadoop.ReverseTupleComparator;
-import cascading.tuple.hadoop.ReverseTuplePairComparator;
-import cascading.tuple.hadoop.TupleComparator;
-import cascading.tuple.hadoop.TuplePairComparator;
-import cascading.tuple.hadoop.TupleSerialization;
+import cascading.tuple.*;
+import cascading.tuple.hadoop.*;
 import cascading.util.Util;
-import org.apache.hadoop.mapred.JobClient;
 import org.apache.hadoop.mapred.JobConf;
-import org.apache.hadoop.mapred.RunningJob;
-import org.apache.hadoop.mapred.TaskCompletionEvent;
 import org.apache.log4j.Logger;
 import org.jgrapht.graph.SimpleDirectedGraph;
 
 import java.io.IOException;
 import java.io.Serializable;
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.Callable;
-import java.util.concurrent.CountDownLatch;
+import java.util.*;
 
 /**
  * Class FlowStep is an internal representation of a given Job to be executed on a remote cluster. During
  * planning, pipe assemblies are broken down into "steps" and encapsulated in this class.
+ * <p/>
+ * FlowSteps are submited in order of dependency. If two or more steps do not share the same dependencies and all
+ * can be scheduled simultaneously, the {@link #getSubmitPriority()} value determines the order in which
+ * all steps will be submitted for execution.
  */
 public class FlowStep implements Serializable
   {
   /** Field LOG */
   private static final Logger LOG = Logger.getLogger( FlowStep.class );
 
+  /** Field properties */
+  private Map<Object, Object> properties = null;
   /** Field parentFlowName */
   private String parentFlowName;
 
+  /** Field submitPriority */
+  private int submitPriority = 5;
+
   /** Field name */
   final String name;
+  /** Field id */
+  private int id;
   /** Field graph */
   final SimpleDirectedGraph<FlowElement, Scope> graph = new SimpleDirectedGraph<FlowElement, Scope>( Scope.class );
 
   /** Field sources */
   final Map<Tap, String> sources = new HashMap<Tap, String>();   // all sources and all sinks must have same scheme
   /** Field sink */
-  Tap sink;
+  protected Tap sink;
   /** Field mapperTraps */
   public final Map<String, Tap> mapperTraps = new HashMap<String, Tap>();
   /** Field reducerTraps */
@@ -89,9 +82,10 @@ public class FlowStep implements Serializable
   /** Field group */
   public Group group;
 
-  FlowStep( String name )
+  protected FlowStep( String name, int id )
     {
     this.name = name;
+    this.id = id;
     }
 
   /**
@@ -114,7 +108,12 @@ public class FlowStep implements Serializable
     return parentFlowName;
     }
 
-  void setParentFlowName( String parentFlowName )
+  /**
+   * Method setParentFlowName sets the parentFlowName of this FlowStep object.
+   *
+   * @param parentFlowName the parentFlowName of this FlowStep object.
+   */
+  public void setParentFlowName( String parentFlowName )
     {
     this.parentFlowName = parentFlowName;
     }
@@ -129,14 +128,78 @@ public class FlowStep implements Serializable
     return String.format( "%s[%s]", getParentFlowName(), getName() );
     }
 
-  JobConf getJobConf() throws IOException
+  /**
+   * Method getSubmitPriority returns the submitPriority of this FlowStep object.
+   * <p/>
+   * 10 is lowest, 1 is the highest, 5 is the default.
+   *
+   * @return the submitPriority (type int) of this FlowStep object.
+   */
+  public int getSubmitPriority()
+    {
+    return submitPriority;
+    }
+
+  /**
+   * Method setSubmitPriority sets the submitPriority of this FlowStep object.
+   * <p/>
+   * 10 is lowest, 1 is the highest, 5 is the default.
+   *
+   * @param submitPriority the submitPriority of this FlowStep object.
+   */
+  public void setSubmitPriority( int submitPriority )
+    {
+    this.submitPriority = submitPriority;
+    }
+
+  /**
+   * Method getProperties returns the properties of this FlowStep object.
+   *
+   * @return the properties (type Map<Object, Object>) of this FlowStep object.
+   */
+  public Map<Object, Object> getProperties()
+    {
+    if( properties == null )
+      properties = new Properties();
+
+    return properties;
+    }
+
+  /**
+   * Method setProperties sets the properties of this FlowStep object.
+   *
+   * @param properties the properties of this FlowStep object.
+   */
+  public void setProperties( Map<Object, Object> properties )
+    {
+    this.properties = properties;
+    }
+
+  /**
+   * Method hasProperties returns {@code true} if there are properties associated with this FlowStep.
+   *
+   * @return boolean
+   */
+  public boolean hasProperties()
+    {
+    return properties != null && !properties.isEmpty();
+    }
+
+  protected JobConf getJobConf() throws IOException
     {
     return getJobConf( null );
     }
 
-  JobConf getJobConf( JobConf parentConf ) throws IOException
+  protected JobConf getJobConf( JobConf parentConf ) throws IOException
     {
     JobConf conf = parentConf == null ? new JobConf() : new JobConf( parentConf );
+
+    // set values first so they can't break things downstream
+    if( hasProperties() )
+      {
+      for( Map.Entry entry : getProperties().entrySet() )
+        conf.set( entry.getKey().toString(), entry.getValue().toString() );
+      }
 
     conf.setJobName( getStepName() );
 
@@ -176,6 +239,11 @@ public class FlowStep implements Serializable
       conf.setMapOutputKeyClass( Tuple.class );
       conf.setMapOutputValueClass( Tuple.class );
 
+      addComparators( conf, "cascading.group.comparator", group.getGroupingSelectors() );
+
+      if( group.isGroupBy() )
+        addComparators( conf, "cascading.sort.comparator", group.getSortingSelectors() );
+
       // handles the case the groupby sort should be reversed
       if( group.isSortReversed() )
         conf.setOutputKeyComparatorClass( ReverseTupleComparator.class );
@@ -199,9 +267,25 @@ public class FlowStep implements Serializable
       }
 
     // perform last so init above will pass to tasks
+    conf.setInt( "cascading.flow.step.id", id );
     conf.set( "cascading.flow.step", Util.serializeBase64( this ) );
 
     return conf;
+    }
+
+  private void addComparators( JobConf conf, String property, Map<String, Fields> map ) throws IOException
+    {
+    Iterator<Fields> fieldsIterator = map.values().iterator();
+
+    if( !fieldsIterator.hasNext() )
+      return;
+
+    Fields fields = fieldsIterator.next();
+
+    if( fields.hasComparators() )
+      conf.set( property, Util.serializeBase64( fields ) );
+
+    return;
     }
 
   private void initFromTraps( JobConf conf ) throws IOException
@@ -217,9 +301,7 @@ public class FlowStep implements Serializable
       JobConf trapConf = new JobConf( conf );
 
       for( Tap tap : traps.values() )
-        {
         tap.sinkInit( trapConf );
-        }
       }
     }
 
@@ -241,10 +323,13 @@ public class FlowStep implements Serializable
 
   private void initFromSink( JobConf conf ) throws IOException
     {
+    // init sink first so tempSink can take precedence
+    if( sink != null )
+      sink.sinkInit( conf );
+
+    // tempSink exists because sink is writeDirect
     if( tempSink != null )
       tempSink.sinkInit( conf );
-    else
-      sink.sinkInit( conf );
     }
 
   public TapIterator openSourceForRead( JobConf conf ) throws IOException
@@ -322,6 +407,19 @@ public class FlowStep implements Serializable
       }
 
     return operations;
+    }
+
+  public boolean containsPipeNamed( String pipeName )
+    {
+    Set<FlowElement> vertices = graph.vertexSet();
+
+    for( FlowElement vertice : vertices )
+      {
+      if( vertice instanceof Pipe && ( (Pipe) vertice ).getName().equals( pipeName ) )
+        return true;
+      }
+
+    return false;
     }
 
   /**
@@ -412,192 +510,42 @@ public class FlowStep implements Serializable
     return buffer.toString();
     }
 
-  public FlowStepJob getFlowStepJob( JobConf parentConf ) throws IOException
+  protected FlowStepJob createFlowStepJob( JobConf parentConf ) throws IOException
     {
-    return new FlowStepJob( this.getName(), getJobConf( parentConf ) );
+    return new FlowStepJob( this, getName(), getJobConf( parentConf ) );
     }
 
-  public class FlowStepJob implements Callable<Throwable>
+  protected final boolean isInfoEnabled()
     {
-    private final String stepName;
-    private JobConf currentConf;
-    private JobClient currentJobClient;
-    private RunningJob runningJob;
-
-    private List<FlowStepJob> predecessors;
-    private final CountDownLatch latch = new CountDownLatch( 1 );
-    private boolean stop = false;
-    private long pollingInterval;
-
-    public FlowStepJob( String stepName, JobConf currentConf )
-      {
-      this.stepName = stepName;
-      this.currentConf = currentConf;
-      this.pollingInterval = Flow.getJobPollingInterval( currentConf );
-      }
-
-    public void stop()
-      {
-      if( LOG.isInfoEnabled() )
-        logInfo( "stopping: " + stepName );
-
-      stop = true;
-
-      try
-        {
-        if( runningJob != null )
-          runningJob.killJob();
-        }
-      catch( IOException exception )
-        {
-        logWarn( "unable to kill job: " + stepName, exception );
-        }
-      }
-
-    public void setPredecessors( List<FlowStepJob> predecessors ) throws IOException
-      {
-      this.predecessors = predecessors;
-      }
-
-    public Throwable call()
-      {
-      try
-        {
-        for( FlowStepJob predecessor : predecessors )
-          {
-          if( !predecessor.isSuccessful() )
-            {
-            logWarn( "abandoning step: " + stepName + ", predecessor failed: " + predecessor.stepName );
-
-            return null;
-            }
-          }
-
-        if( stop )
-          return null;
-
-        if( LOG.isInfoEnabled() )
-          logInfo( "starting step: " + stepName );
-
-        currentJobClient = new JobClient( currentConf );
-        runningJob = currentJobClient.submitJob( currentConf );
-
-        blockTillCompleteOrStopped();
-
-        if( !stop && !runningJob.isSuccessful() )
-          {
-          dumpCompletionEvents();
-
-          return new FlowException( "step failed: " + stepName );
-          }
-        }
-      catch( Throwable throwable )
-        {
-        dumpCompletionEvents();
-        return throwable;
-        }
-      finally
-        {
-        latch.countDown();
-        }
-
-      return null;
-      }
-
-    protected void blockTillCompleteOrStopped() throws IOException
-      {
-      while( true )
-        {
-        if( stop || runningJob.isComplete() )
-          break;
-
-        sleep();
-        }
-      }
-
-    protected void sleep()
-      {
-      try
-        {
-        Thread.sleep( pollingInterval );
-        }
-      catch( InterruptedException exception )
-        {
-        // do nothing
-        }
-      }
-
-    private void dumpCompletionEvents()
-      {
-      try
-        {
-        if( runningJob == null )
-          return;
-
-        TaskCompletionEvent[] events = runningJob.getTaskCompletionEvents( 0 );
-        logWarn( "completion events count: " + events.length );
-
-        for( TaskCompletionEvent event : events )
-          logWarn( "event = " + event );
-        }
-      catch( IOException exception )
-        {
-        logError( "failed reading completion events", exception );
-        }
-      }
-
-    /**
-     * Method isSuccessful returns true if this step completed successfully.
-     *
-     * @return the successful (type boolean) of this FlowStepJob object.
-     */
-    public boolean isSuccessful()
-      {
-      try
-        {
-        latch.await();
-
-        return runningJob != null && runningJob.isSuccessful();
-        }
-      catch( InterruptedException exception )
-        {
-        logWarn( "latch interrupted", exception );
-        }
-      catch( IOException exception )
-        {
-        logWarn( "error querying job", exception );
-        }
-
-      return false;
-      }
-
-    /**
-     * Method wasStarted returns true if this job was started
-     *
-     * @return boolean
-     */
-    public boolean wasStarted()
-      {
-      return runningJob != null;
-      }
+    return LOG.isInfoEnabled();
     }
 
-  private void logInfo( String message )
+  protected final boolean isDebugEnabled()
+    {
+    return LOG.isDebugEnabled();
+    }
+
+  protected void logDebug( String message )
+    {
+    LOG.debug( "[" + Util.truncate( getParentFlowName(), 25 ) + "] " + message );
+    }
+
+  protected void logInfo( String message )
     {
     LOG.info( "[" + Util.truncate( getParentFlowName(), 25 ) + "] " + message );
     }
 
-  private void logWarn( String message )
+  protected void logWarn( String message )
     {
     LOG.warn( "[" + Util.truncate( getParentFlowName(), 25 ) + "] " + message );
     }
 
-  private void logWarn( String message, Throwable throwable )
+  protected void logWarn( String message, Throwable throwable )
     {
     LOG.warn( "[" + Util.truncate( getParentFlowName(), 25 ) + "] " + message, throwable );
     }
 
-  private void logError( String message, Throwable throwable )
+  protected void logError( String message, Throwable throwable )
     {
     LOG.error( "[" + Util.truncate( getParentFlowName(), 25 ) + "] " + message, throwable );
     }

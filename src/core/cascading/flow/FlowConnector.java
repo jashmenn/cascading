@@ -21,16 +21,22 @@
 
 package cascading.flow;
 
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Properties;
+import java.util.Set;
+
 import cascading.CascadingException;
 import cascading.operation.Assertion;
 import cascading.operation.AssertionLevel;
+import cascading.operation.DebugLevel;
 import cascading.pipe.Pipe;
 import cascading.scheme.SequenceFile;
 import cascading.tap.Tap;
 import cascading.util.Util;
 import org.apache.hadoop.mapred.JobConf;
-
-import java.util.*;
 
 /**
  * Use the FlowConnector to link source and sink {@link Tap} instances with an assembly of {@link Pipe} instances into
@@ -59,11 +65,15 @@ import java.util.*;
  * By default, all {@link Assertion}s are planned into the resulting Flow instance. This can be
  * changed by calling {@link #setAssertionLevel(java.util.Map, cascading.operation.AssertionLevel)}.
  * <p/>
+ * Also by default, all {@link cascading.operation.Debug}s are planned into the resulting Flow instance. This can be
+ * changed by calling {@link #setDebugLevel(java.util.Map, cascading.operation.DebugLevel)}.
+ * <p/>
  * <strong>Properties</strong><br/>
  * <ul>
  * <li>cascading.flowconnector.appjar.class</li>
  * <li>cascading.flowconnector.appjar.path</li>
  * <li>cascading.flowconnector.assertionlevel</li>
+ * <li>cascading.flowconnector.debuglevel</li>
  * <li>cascading.flowconnector.intermediateschemeclass</li>
  * </ul>
  *
@@ -98,6 +108,32 @@ public class FlowConnector
 
     return AssertionLevel.valueOf( assertionLevel );
     }
+
+  /**
+   * Method setDebugLevel sets the target planner {@link cascading.operation.DebugLevel}.
+   *
+   * @param properties of type Map<Object, Object>
+   * @param debugLevel of type DebugLevel
+   */
+  public static void setDebugLevel( Map<Object, Object> properties, DebugLevel debugLevel )
+    {
+    if( debugLevel != null )
+      properties.put( "cascading.flowconnector.debuglevel", debugLevel.toString() );
+    }
+
+  /**
+   * Method getDebugLevel returns the configured target planner {@link cascading.operation.DebugLevel}.
+   *
+   * @param properties of type Map<Object, Object>
+   * @return DebugLevel the configured DebugLevel
+   */
+  public static DebugLevel getDebugLevel( Map<Object, Object> properties )
+    {
+    String debugLevel = Util.getProperty( properties, "cascading.flowconnector.debuglevel", DebugLevel.DEFAULT.name() );
+
+    return DebugLevel.valueOf( debugLevel );
+    }
+
 
   /**
    * Method setIntermediateSchemeClass is used for debugging. The default Scheme for intermediate files is {@link SequenceFile}.

@@ -21,6 +21,11 @@
 
 package cascading.tuple.hadoop;
 
+import java.io.File;
+import java.io.Serializable;
+import java.util.HashMap;
+import java.util.Map;
+
 import cascading.ClusterTestCase;
 import cascading.flow.Flow;
 import cascading.flow.FlowConnector;
@@ -44,13 +49,9 @@ import cascading.tap.Hfs;
 import cascading.tap.Tap;
 import cascading.tuple.Fields;
 import cascading.tuple.Tuple;
+import cascading.tuple.TupleEntryIterator;
 import org.apache.hadoop.io.BooleanWritable;
 import org.apache.hadoop.io.BytesWritable;
-
-import java.io.File;
-import java.io.Serializable;
-import java.util.HashMap;
-import java.util.Map;
 
 public class SerializedPipesTest extends ClusterTestCase
   {
@@ -74,6 +75,35 @@ public class SerializedPipesTest extends ClusterTestCase
     public void operate( FlowProcess flowProcess, FunctionCall functionCall )
       {
       functionCall.getOutputCollector().add( new Tuple( new BytesWritable( asBytes.getBytes() ) ) );
+      }
+    }
+
+  public static class ReplaceAsBytes extends BaseOperation implements Function
+    {
+    public ReplaceAsBytes( Fields fieldDeclaration )
+      {
+      super( fieldDeclaration );
+      }
+
+    public void operate( FlowProcess flowProcess, FunctionCall functionCall )
+      {
+      functionCall.getOutputCollector().add( new Tuple( new BytesWritable( functionCall.getArguments().getString( 0 ).getBytes() ) ) );
+      }
+    }
+
+  public static class InsertRawBytes extends BaseOperation implements Function
+    {
+    String asBytes;
+
+    public InsertRawBytes( Fields fieldDeclaration, String asBytes )
+      {
+      super( fieldDeclaration );
+      this.asBytes = asBytes;
+      }
+
+    public void operate( FlowProcess flowProcess, FunctionCall functionCall )
+      {
+      functionCall.getOutputCollector().add( new Tuple( (Object) asBytes.getBytes() ) );
       }
     }
 
@@ -208,6 +238,52 @@ public class SerializedPipesTest extends ClusterTestCase
     validateLength( countFlow, 25, null );
     }
 
+  public void testCoGroupBytesWritableAsKeyValue() throws Exception
+    {
+    if( !new File( inputFileLower ).exists() )
+      fail( "data file not found" );
+
+    copyFromLocal( inputFileLower );
+    copyFromLocal( inputFileUpper );
+
+    Tap sourceLower = new Hfs( new TextLine( new Fields( "offset", "line" ) ), inputFileLower );
+    Tap sourceUpper = new Hfs( new TextLine( new Fields( "offset", "line" ) ), inputFileUpper );
+
+    Map sources = new HashMap();
+
+    sources.put( "lower", sourceLower );
+    sources.put( "upper", sourceUpper );
+
+    Function splitter = new RegexSplitter( new Fields( "num", "char" ), " " );
+
+    // using null pos so all fields are written
+    Tap sink = new Hfs( new TextLine(), outputPath + "/hadoop/byteswritablekeyvalue", true );
+
+    Pipe pipeLower = new Each( new Pipe( "lower" ), new Fields( "line" ), splitter );
+    pipeLower = new Each( pipeLower, new Fields( "char" ), new ReplaceAsBytes( new Fields( "char" ) ), Fields.REPLACE );
+
+    Pipe pipeUpper = new Each( new Pipe( "upper" ), new Fields( "line" ), splitter );
+    pipeUpper = new Each( pipeUpper, new Fields( "char" ), new ReplaceAsBytes( new Fields( "char" ) ), Fields.REPLACE );
+
+    Pipe splice = new CoGroup( pipeLower, new Fields( "num" ), pipeUpper, new Fields( "num" ), Fields.size( 4 ) );
+
+    Flow countFlow = new FlowConnector( getProperties() ).connect( sources, sink, splice );
+
+//    countFlow.writeDOT( "cogroup.dot" );
+//    System.out.println( "countFlow =\n" + countFlow );
+
+    countFlow.complete();
+
+    validateLength( countFlow, 5, null );
+
+    TupleEntryIterator iterator = countFlow.openSink();
+
+    assertEquals( "not equal: tuple.get(1)", "1\t61\t1\t41", iterator.next().get( 1 ) );
+
+    iterator.close();
+
+    }
+
   public void testCoGroupSpillCustomWritable() throws Exception
     {
     if( !new File( inputFileLower ).exists() )
@@ -259,4 +335,57 @@ public class SerializedPipesTest extends ClusterTestCase
 
     validateLength( countFlow, 25, null );
     }
+
+  public void testCoGroupRawAsKeyValue() throws Exception
+    {
+    if( !new File( inputFileLower ).exists() )
+      fail( "data file not found" );
+
+    copyFromLocal( inputFileLower );
+    copyFromLocal( inputFileUpper );
+
+    Tap sourceLower = new Hfs( new TextLine( new Fields( "offset", "line" ) ), inputFileLower );
+    Tap sourceUpper = new Hfs( new TextLine( new Fields( "offset", "line" ) ), inputFileUpper );
+
+    Map sources = new HashMap();
+
+    sources.put( "lower", sourceLower );
+    sources.put( "upper", sourceUpper );
+
+    Function splitter = new RegexSplitter( new Fields( "num", "char" ), " " );
+
+    // using null pos so all fields are written
+    Tap sink = new Hfs( new SequenceFile( Fields.ALL ), outputPath + "/hadoop/rawbyteskeyvalue", true );
+
+    Pipe pipeLower = new Each( new Pipe( "lower" ), new Fields( "line" ), splitter );
+    pipeLower = new Each( pipeLower, new InsertRawBytes( new Fields( "group" ), "inserted text as bytes" ), Fields.ALL );
+    pipeLower = new Each( pipeLower, new InsertRawBytes( new Fields( "value" ), "inserted text as bytes" ), Fields.ALL );
+
+    Pipe pipeUpper = new Each( new Pipe( "upper" ), new Fields( "line" ), splitter );
+    pipeUpper = new Each( pipeUpper, new InsertRawBytes( new Fields( "group" ), "inserted text as bytes" ), Fields.ALL );
+    pipeUpper = new Each( pipeUpper, new InsertRawBytes( new Fields( "value" ), "inserted text as bytes" ), Fields.ALL );
+
+    Fields groupFields = new Fields( "group" );
+    groupFields.setComparator( "group", new BytesComparator() );
+
+    Fields declaredFields = new Fields( "num", "char", "group", "value", "num2", "char2", "group2", "value2" );
+    Pipe splice = new CoGroup( pipeLower, groupFields, pipeUpper, groupFields, declaredFields );
+
+    // test sorting comparison
+    Fields valueFields = new Fields( "value" );
+    valueFields.setComparator( "value", new BytesComparator() );
+    splice = new GroupBy( splice, groupFields, valueFields );
+
+    Map<Object, Object> properties = getProperties();
+    TupleSerialization.addSerialization( properties, BytesSerialization.class.getName() );
+    Flow countFlow = new FlowConnector( properties ).connect( sources, sink, splice );
+
+//    countFlow.writeDOT( "cogroup.dot" );
+//    System.out.println( "countFlow =\n" + countFlow );
+
+    countFlow.complete();
+
+    validateLength( countFlow, 25, null );
+    }
+
   }

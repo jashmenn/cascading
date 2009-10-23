@@ -21,17 +21,20 @@
 
 package cascading.pipe;
 
+import java.util.Set;
+
 import cascading.flow.Scope;
 import cascading.operation.Assertion;
 import cascading.operation.AssertionLevel;
 import cascading.operation.BaseOperation;
 import cascading.operation.Operation;
+import cascading.operation.PlannedOperation;
+import cascading.operation.PlannerLevel;
 import cascading.tuple.Fields;
+import cascading.tuple.FieldsResolverException;
 import cascading.tuple.Tuple;
 import cascading.tuple.TupleEntry;
 import cascading.tuple.TupleException;
-
-import java.util.Set;
 
 /**
  * An Opererator is a type of {@link Pipe}. Operators pass specified arguments to a given {@link cascading.operation.BaseOperation}.
@@ -49,7 +52,7 @@ public abstract class Operator extends Pipe
   /** Field outputSelector */
   protected Fields outputSelector = Fields.RESULTS;  // this is overridden by the subclasses via the ctor
   /** Field assertionLevel */
-  protected AssertionLevel assertionLevel; // do not initialize a default
+  protected PlannerLevel plannerLevel; // do not initialize a default
 
   protected Operator( Operation operation )
     {
@@ -121,38 +124,38 @@ public abstract class Operator extends Pipe
     verifyOperation();
     }
 
-  protected Operator( String name, AssertionLevel assertionLevel, Operation operation, Fields outputSelector )
+  protected Operator( String name, PlannerLevel plannerLevel, PlannedOperation operation, Fields outputSelector )
     {
     super( name );
-    this.assertionLevel = assertionLevel;
+    this.plannerLevel = plannerLevel;
     this.operation = operation;
     this.outputSelector = outputSelector;
     verifyOperation();
     }
 
-  protected Operator( String name, Fields argumentSelector, AssertionLevel assertionLevel, Operation operation, Fields outputSelector )
+  protected Operator( String name, Fields argumentSelector, PlannerLevel plannerLevel, PlannedOperation operation, Fields outputSelector )
     {
     super( name );
-    this.assertionLevel = assertionLevel;
+    this.plannerLevel = plannerLevel;
     this.operation = operation;
     this.argumentSelector = argumentSelector;
     this.outputSelector = outputSelector;
     verifyOperation();
     }
 
-  protected Operator( Pipe previous, AssertionLevel assertionLevel, Operation operation, Fields outputSelector )
+  protected Operator( Pipe previous, PlannerLevel plannerLevel, PlannedOperation operation, Fields outputSelector )
     {
     super( previous );
-    this.assertionLevel = assertionLevel;
+    this.plannerLevel = plannerLevel;
     this.operation = operation;
     this.outputSelector = outputSelector;
     verifyOperation();
     }
 
-  protected Operator( Pipe previous, Fields argumentSelector, AssertionLevel assertionLevel, Operation operation, Fields outputSelector )
+  protected Operator( Pipe previous, Fields argumentSelector, PlannerLevel plannerLevel, PlannedOperation operation, Fields outputSelector )
     {
     super( previous );
-    this.assertionLevel = assertionLevel;
+    this.plannerLevel = plannerLevel;
     this.operation = operation;
     this.argumentSelector = argumentSelector;
     this.outputSelector = outputSelector;
@@ -170,8 +173,13 @@ public abstract class Operator extends Pipe
     if( outputSelector == null )
       throw new IllegalArgumentException( "outputSelector may not be null" );
 
-    if( operation instanceof Assertion && ( assertionLevel == null || assertionLevel == AssertionLevel.NONE ) )
-      throw new IllegalArgumentException( "assertionLevel may not be null or NONE" );
+    if( operation instanceof PlannedOperation )
+      {
+      if( plannerLevel == null )
+        throw new IllegalArgumentException( "planner level may not be null" );
+      else if( plannerLevel.isNoneLevel() )
+        throw new IllegalArgumentException( "given planner level: " + plannerLevel.getClass().getName() + ", may not be NONE" );
+      }
     }
 
   /**
@@ -220,39 +228,89 @@ public abstract class Operator extends Pipe
    *
    * @return the assertionLevel (type Assertion.Level) of this Operator object.
    */
+  @Deprecated
   public AssertionLevel getAssertionLevel()
     {
-    return assertionLevel;
+    return (AssertionLevel) plannerLevel;
     }
 
   /**
-   * Method isAssertion returns true if this Operation represents an {@link Assertion}.
+   * Method getPlannerLevel returns the plannerLevel of this Operator object.
+   *
+   * @return the plannerLevel (type PlannerLevel) of this Operator object.
+   */
+  public PlannerLevel getPlannerLevel()
+    {
+    return plannerLevel;
+    }
+
+  /**
+   * Method isAssertion returns true if this Operation represents an {@link Assertion} operation.
    *
    * @return the assertion (type boolean) of this Operator object.
    */
+  @Deprecated
   public boolean isAssertion()
     {
-    return assertionLevel != null;
+    return plannerLevel instanceof AssertionLevel;
     }
 
-  protected Tuple makeResult( Fields outgoingSelector, TupleEntry input, TupleEntry declaredEntry, Tuple output )
+  /**
+   * Method hasPlannerLevel returns true if this Operator object holds a {@link PlannedOperation} object with an associated
+   * {@link PlannerLevel} level.
+   *
+   * @return boolean
+   */
+  public boolean hasPlannerLevel()
+    {
+    return plannerLevel != null;
+    }
+
+  protected Tuple makeResult( Fields outgoingSelector, TupleEntry inputEntry, Fields remainderFields, TupleEntry declaredEntry, Tuple output )
     {
     if( getOutputSelector().isResults() )
       return output;
 
     if( getOutputSelector().isAll() )
-      return input.getTuple().append( output );
+      return inputEntry.getTuple().append( output );
+
+    if( getOutputSelector().isReplace() )
+      {
+      Tuple result = new Tuple( inputEntry.getTuple() );
+
+      result.set( inputEntry.getFields(), declaredEntry.getFields(), output );
+
+      return result;
+      }
+
+    if( getOutputSelector().isSwap() )
+      {
+      if( remainderFields.size() == 0 ) // the same as Fields.RESULTS
+        return output;
+      else
+        return inputEntry.selectTuple( remainderFields ).append( output );
+      }
 
     declaredEntry.setTuple( output );
 
-    return TupleEntry.select( outgoingSelector, input, declaredEntry );
+    return TupleEntry.select( outgoingSelector, inputEntry, declaredEntry );
     }
 
   // FIELDS
 
+  protected Fields resolveRemainderFields( Set<Scope> incomingScopes, Fields argumentFields )
+    {
+    Fields fields = resolveIncomingOperationFields( getFirst( incomingScopes ) );
+
+    if( fields.isUnknown() )
+      return fields;
+
+    return fields.subtract( argumentFields );
+    }
+
   public abstract Scope outgoingScopeFor( Set<Scope> incomingScopes );
 
-  void verifyDeclared( Fields declared )
+  void verifyDeclaredFields( Fields declared )
     {
     if( declared.isDefined() && declared.size() == 0 )
       throw new OperatorException( this, "field declaration: " + getFieldDeclaration().printVerbose() + ", resolves to an empty field set, current grouping is on all fields" );
@@ -273,16 +331,16 @@ public abstract class Operator extends Pipe
       throw new OperatorException( this, "resolved wrong number of arguments: " + argumentSelector.printVerbose() + ", expected: " + operation.getNumArgs() );
     }
 
-  Fields resolveOutgoingSelector( Set<Scope> incomingScopes, Fields argumentSelector, Fields declared )
+  Fields resolveOutgoingSelector( Set<Scope> incomingScopes, Fields argumentFields, Fields declaredFields )
     {
     Scope incomingScope = getFirst( incomingScopes );
     Fields outputSelector = getOutputSelector();
 
     if( outputSelector.isResults() )
-      return declared;
+      return declaredFields;
 
     if( outputSelector.isArguments() )
-      return argumentSelector;
+      return argumentFields;
 
     if( outputSelector.isGroup() )
       return incomingScope.getOutGroupingFields();
@@ -290,24 +348,28 @@ public abstract class Operator extends Pipe
     if( outputSelector.isValues() )
       return incomingScope.getOutValuesFields().subtract( incomingScope.getOutGroupingFields() );
 
+    if( outputSelector.isSwap() )
+      return incomingScope.getOutValuesFields().subtract( argumentFields ).append( declaredFields );
+
     Fields incomingFields = resolveFields( incomingScope );
 
     try
       {
-      return Fields.resolve( outputSelector, incomingFields, declared );
+      return Fields.resolve( outputSelector, incomingFields, declaredFields );
       }
     catch( TupleException exception )
       {
-      throw new OperatorException( "unable to resolve selector using incoming: " + incomingFields.printVerbose() + " declared: " + declared.printVerbose(), exception );
+      throw new OperatorException( this, incomingFields, declaredFields, outputSelector, exception );
       }
     }
 
   Fields resolveArgumentSelector( Set<Scope> incomingScopes )
     {
+    Fields argumentSelector = getArgumentSelector();
+
     try
       {
       Scope incomingScope = getFirst( incomingScopes );
-      Fields argumentSelector = getArgumentSelector();
 
       if( argumentSelector.isAll() )
         return resolveIncomingOperationFields( incomingScope );
@@ -320,18 +382,23 @@ public abstract class Operator extends Pipe
 
       return resolveIncomingOperationFields( incomingScope ).select( argumentSelector );
       }
+    catch( FieldsResolverException exception )
+      {
+      throw new OperatorException( this, OperatorException.Kind.argument, exception.getSourceFields(), argumentSelector, exception );
+      }
     catch( Exception exception )
       {
-      throw new OperatorException( this, "could not resolve argument selector in: " + this, exception );
+      throw new OperatorException( this, "unable to resolve argument selector: " + argumentSelector.printVerbose(), exception );
       }
     }
 
   Fields resolveDeclared( Set<Scope> incomingScopes, Fields arguments )
     {
+    Fields fieldDeclaration = getFieldDeclaration();
+
     try
       {
       Scope incomingScope = getFirst( incomingScopes );
-      Fields fieldDeclaration = getFieldDeclaration();
 
       if( fieldDeclaration.isUnknown() )
         return fieldDeclaration;
@@ -349,12 +416,21 @@ public abstract class Operator extends Pipe
       if( fieldDeclaration.isValues() )
         return incomingScope.getOutValuesFields().subtract( incomingScope.getOutGroupingFields() );
 
-      return fieldDeclaration;
       }
     catch( Exception exception )
       {
       throw new OperatorException( this, "could not resolve declared fields in:  " + this, exception );
       }
+
+    if( getOutputSelector().isReplace() )
+      {
+      if( arguments.isDefined() && fieldDeclaration.isDefined() && arguments.size() != fieldDeclaration.size() )
+        throw new OperatorException( this, "during REPLACE both the arguments selector and field declaration must be the same size, arguments: " + arguments.printVerbose() + " declaration: " + fieldDeclaration.printVerbose() );
+
+      return arguments.project( fieldDeclaration );
+      }
+
+    return fieldDeclaration;
     }
 
   // OBJECT OVERRIDES

@@ -21,6 +21,7 @@
 
 package cascading.stats;
 
+import java.util.Collection;
 import java.util.LinkedList;
 import java.util.List;
 
@@ -50,6 +51,29 @@ public class CascadeStats extends CascadingStats
   public int getFlowCount()
     {
     return flowStatsList.size();
+    }
+
+  @Override
+  public long getCounterValue( Enum counter )
+    {
+    long value = 0;
+
+    for( FlowStats flowStats : flowStatsList )
+      value += flowStats.getCounterValue( counter );
+
+    return value;
+    }
+
+  @Override
+  public void captureDetail()
+    {
+    for( FlowStats flowStats : flowStatsList )
+      flowStats.captureDetail();
+    }
+
+  public Collection getChildren()
+    {
+    return flowStatsList;
     }
 
   @Override

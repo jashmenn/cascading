@@ -21,6 +21,8 @@
 
 package cascading.flow.stack;
 
+import java.io.IOException;
+
 import cascading.CascadingException;
 import cascading.flow.FlowElement;
 import cascading.flow.FlowException;
@@ -33,8 +35,6 @@ import cascading.tuple.Tuple;
 import cascading.tuple.TupleEntry;
 import cascading.tuple.TupleEntryCollector;
 import org.apache.hadoop.mapred.OutputCollector;
-
-import java.io.IOException;
 
 /**
  *
