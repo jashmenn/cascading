@@ -96,7 +96,8 @@ public class MapReduceFlow extends Flow
    */
   public MapReduceFlow( String name, JobConf jobConf, boolean deleteSinkOnInit )
     {
-    this( name, jobConf, deleteSinkOnInit, true );
+    // this( name, jobConf, deleteSinkOnInit, true );
+    this( name, jobConf, null, null, null, deleteSinkOnInit, true );
     }
 
   /**
@@ -107,15 +108,36 @@ public class MapReduceFlow extends Flow
    * @param deleteSinkOnInit of type boolean
    * @param stopJobsOnExit   of type boolean
    */
-  public MapReduceFlow( String name, JobConf jobConf, boolean deleteSinkOnInit, boolean stopJobsOnExit )
+  /*
+   * public MapReduceFlow( String name, JobConf jobConf, boolean deleteSinkOnInit, boolean stopJobsOnExit )
+   *   {
+   *     this( name, jobConf, createSources( jobConf ), createSinks( jobConf ), createTraps( jobConf ), deleteSinkOnInit, stopJobsOnExit);
+   *   }
+   */
+
+/*
+ *   public MapReduceFlow( String name, JobConf jobConf, Tap source, Tap sink, boolean deleteSinkOnInit, boolean stopJobsOnExit )
+ *     {
+ *       Map<String, Tap> sources = new HashMap<String, Tap>();
+ *       Map<String, Tap> sinks   = new HashMap<String, Tap>();
+ *       Map<String, Tap> traps   = new HashMap<String, Tap>();
+ * 
+ *       sources.put(source.getPath().toString(), source);
+ *       sinks.put(sink.getPath().toString(), sink);
+ *       this( name, jobConf, sources, sinks, traps, deleteSinkOnInit, stopJobsOnExit);
+ *     }
+ */
+
+  public MapReduceFlow( String name, JobConf jobConf, Map<String, Tap> sources, Map<String, Tap> sinks, Map<String, Tap> traps, 
+      boolean deleteSinkOnInit, boolean stopJobsOnExit )
     {
     this.deleteSinkOnInit = deleteSinkOnInit;
     this.stopJobsOnExit = stopJobsOnExit;
 
     setName( name );
-    setSources( createSources( jobConf ) );
-    setSinks( createSinks( jobConf ) );
-    setTraps( createTraps( jobConf ) );
+    setSources( sources );
+    setSinks( sinks );
+    setTraps( traps );
     setStepGraph( makeStepGraph( jobConf ) );
     }
 
