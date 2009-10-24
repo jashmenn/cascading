@@ -100,6 +100,12 @@ public class TempHfs extends Hfs
     super( isNull ? new NullScheme() : new SequenceFile()
     {
     } );
+
+    if( schemeClass == null )
+      this.schemeClass = SequenceFile.class;
+    else
+      this.schemeClass = schemeClass;
+
     this.name = name;
     }
 
