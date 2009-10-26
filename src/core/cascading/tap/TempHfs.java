@@ -101,11 +101,6 @@ public class TempHfs extends Hfs
     {
     } );
 
-    if( schemeClass == null )
-      this.schemeClass = SequenceFile.class;
-    else
-      this.schemeClass = schemeClass;
-
     this.name = name;
     }
 
